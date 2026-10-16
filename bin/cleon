@@ -166,6 +166,7 @@ ls)
 		[ "$n" = "$first" ] && printf '   %s← cleon starts here%s' "$GRN" "$X"
 		printf '\n'
 		# The saved login, read locally; a quota the status line saved proves it worked then.
+		prepare "$n" >/dev/null # here, not inside the quiet call below, so its warnings show
 		st="$(on "$n" claude auth status --json </dev/null 2>/dev/null)"
 		if [ "$(jq -r '.loggedIn' <<<"$st" 2>/dev/null)" != true ]; then
 			printf '     %s✗ not logged in%s   %slog in: %s%s\n\n' "$RED" "$X" "$D" "$(relogin "$n")" "$X"
