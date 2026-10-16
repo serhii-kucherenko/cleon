@@ -94,7 +94,9 @@ valid() { # valid <name...>: account names are lowercase, so two folders never d
 
 share() { # share <target> <link>: a symlink; on Windows without Developer Mode, a junction or a hard link
 	[ -n "$windows" ] || { ln -s "$1" "$2"; return; }
-	MSYS=winsymlinks:nativestrict CYGWIN=winsymlinks:nativestrict ln -s "$1" "$2" 2>/dev/null && return
+	# CLEON_SYMLINKS=0 skips the symlink, so a test on an admin machine reaches the fallback too.
+	[ "${CLEON_SYMLINKS:-1}" = 1 ] && MSYS=winsymlinks:nativestrict CYGWIN=winsymlinks:nativestrict \
+		ln -s "$1" "$2" 2>/dev/null && return
 	if [ -d "$1" ]; then
 		MSYS_NO_PATHCONV=1 cmd /c mklink /J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null
 	else

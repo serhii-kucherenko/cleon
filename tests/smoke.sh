@@ -4,6 +4,7 @@
 #   1. kill   the swap hook ends the claude above it (a copy of node, named claude)
 #   2. share  a file in ~/.claude shows in another account
 #   3. quota  cleon ls reads an account's quota (Windows jq writes \r\n)
+#   4. on Windows, share again without symlinks: a junction for a folder, a hard link for a file
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"
@@ -45,4 +46,16 @@ check "share: a folder" '[ "$(cat "$CLEON_HOME/b/skills/note" 2>/dev/null)" = sh
 check "share: a file" 'grep -q shared "$CLEON_HOME/b/settings.json" 2>/dev/null'
 check "quota: cleon ls reads 50%" 'grep -q "week .* 50%" <<<"$out"'
 check "quota: no shell errors" '! grep -qiE "integer|syntax|command not found" <<<"$out"'
+
+if [ -n "$exe" ]; then
+	mkdir -p "$CLEON_HOME/c"
+	echo '{"oauthAccount": {"emailAddress": "c@example.com"}}' >"$CLEON_HOME/c/.claude.json"
+	fallback="$(CLEON_SYMLINKS=0 NO_COLOR=1 "$REPO/bin/cleon" ls 2>&1)"
+	echo 'shared again' >"$HOME/.claude/skills/note"
+	echo '{"shared": "again"}' >"$HOME/.claude/settings.json"
+	check "share without symlinks: a folder (junction)" '[ "$(cat "$CLEON_HOME/c/skills/note" 2>/dev/null)" = "shared again" ]'
+	check "share without symlinks: a file (hard link)" 'grep -q again "$CLEON_HOME/c/settings.json" 2>/dev/null'
+	check "share without symlinks: says to turn on Developer Mode" 'grep -q "Developer Mode" <<<"$fallback"'
+	out="$out$fallback"
+fi
 [ "$fails" -eq 0 ] || { printf '\n%s\n' "$out"; exit 1; }
