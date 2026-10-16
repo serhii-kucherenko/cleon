@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Claude Code status line for cl: saves this account's quota, then shows a status line.
+"""Claude Code status line for cleon: saves this account's quota, then shows a status line.
 
-cl reads the saved <config dir>/quota.json to pick an account with room. Claude Code sends the
+cleon reads the saved <config dir>/quota.json to pick an account with room. Claude Code sends the
 quota only to the status line (https://code.claude.com/docs/en/statusline), so this is the one
-place to catch it. If ~/.claude-accounts/.statusline holds a command (install.sh moves your old
+place to catch it. If ~/.cleon/.statusline holds a command (install.sh moves your old
 status line there), that command gets the same input and prints the line. Otherwise this prints
-"<email> | 5h left N% | 7d left N%".
+"<email> | 5h left N% | 7d left N%". Before the first reply of a session, Claude Code sends no
+quota yet, so this shows the last one saved for this login.
 """
 import json
 import os
@@ -16,7 +17,7 @@ import time
 
 CONFIG = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
 LOGIN = CONFIG / '.claude.json' if os.environ.get('CLAUDE_CONFIG_DIR') else Path.home() / '.claude.json'
-NEXT = Path.home() / '.claude-accounts' / '.statusline'
+NEXT = Path(os.environ.get('CLEON_HOME') or Path.home() / '.cleon') / '.statusline'
 
 
 def email():
@@ -39,8 +40,17 @@ def save_quota(limits):
         pass
 
 
+def saved():
+    try:
+        data = json.loads((CONFIG / 'quota.json').read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if data.get('account', email()) == email() else {}
+
+
 def left(label, window):
-    used = (window or {}).get('used_percentage')
+    window = window or {}
+    used = window.get('used_percentage') if window.get('resets_at', time.time() + 1) > time.time() else 0
     return f'{label} left ' + ('n/a' if used is None else f'{max(0, round(100 - used))}%')
 
 
@@ -57,6 +67,7 @@ def main():
         sys.stdout.write(subprocess.run(command, shell=True, input=raw, text=True,
                                         capture_output=True).stdout)
         return
+    limits = limits or saved()
     print(' | '.join([email(), left('5h', limits.get('five_hour')), left('7d', limits.get('seven_day'))]))
 
 

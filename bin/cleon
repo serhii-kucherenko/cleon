@@ -1,29 +1,30 @@
 #!/bin/bash
-# cl - run claude on one of several Claude accounts, and keep the chat going when one runs out.
+# cleon - run claude on one of several Claude accounts, and keep the chat going when one runs out.
 #
-#   cl [@account] [claude args]   start claude on the first account with room (or the one named)
-#   cl add <name>                 add an account and log in to it
-#   cl ls                         list the accounts and their quota use; ● marks where cl starts
-#   cl order <name...>            set the order cl moves through the accounts in
-#   cl name <name>                name the ~/.claude account (default: main)
-#   cl resume [on|off]            after a switch, the next account carries on by itself (default on)
-#   cl reserve [percent]          the weekly quota each account keeps back (default 5)
-#   cl help                       show this help
+#   cleon [@account] [claude args]   start claude on the first account with room (or the one named)
+#   cleon add <name>                 add an account and log in to it
+#   cleon ls                         list the accounts and their quota use; ● marks where cleon starts
+#   cleon order <name...>            set the order cleon moves through the accounts in
+#   cleon name <name>                name the ~/.claude account (default: main)
+#   cleon resume [on|off]            after a switch, the next account carries on by itself (default on)
+#   cleon reserve [percent]          the weekly quota each account keeps back (default 5)
+#   cleon help                       show this help
 #
-# The account named in ~/.claude-accounts/.main (default "main") is ~/.claude. Every other account is a CLAUDE_CONFIG_DIR under
-# ~/.claude-accounts/<name> that has its own login and .claude.json, and links the parts in SHARED
+# The account named in ~/.cleon/.main (default "main") is ~/.claude. Every other account is a CLAUDE_CONFIG_DIR under
+# ~/.cleon/<name> that has its own login and .claude.json, and links the parts in SHARED
 # (history, settings, hooks, skills) to ~/.claude. So any account can --resume any chat. To share
-# more, list the extra names in ~/.claude-accounts/.shared, one per line.
+# more, list the extra names in ~/.cleon/.shared, one per line.
 #
-# Each account keeps RESERVE percent of its weekly quota (cl reserve sets it). cl skips an account that is down to
+# Each account keeps RESERVE percent of its weekly quota (cleon reserve sets it). cleon skips an account that is down to
 # its reserve or has used its 5-hour quota. When the account gets there mid-turn,
-# hooks/account-swap.sh (install.sh registers it) asks the agent to pause at a safe point with a handoff, and ends claude
-# when the turn ends; it also ends claude on a usage limit or a dead login. cl then resumes the
+# hooks/cleon-swap.sh (install.sh registers it) asks the agent to pause at a safe point with a handoff, and ends claude
+# when the turn ends; it also ends claude on a usage limit or a dead login. cleon then resumes the
 # same chat on the next account, and with auto-resume on, tells it to carry on.
 # The weekly figure is the last one the status line saved in <config dir>/quota.json; a figure
 # saved for another account (after a /login to it) counts as unknown.
 set -u
-A="$HOME/.claude-accounts"
+export CLEON_HOME="${CLEON_HOME:-$HOME/.cleon}" # the hooks read it too
+A="$CLEON_HOME"
 RESERVE="$(cat "$A/.reserve" 2>/dev/null)"
 [[ "$RESERVE" =~ ^(0|[1-9][0-9]?)$ ]] || RESERVE=5 # 0 to 99, no leading zero (bash reads 08 as octal)
 MAIN="$(cat "$A/.main" 2>/dev/null || echo main)"
@@ -31,7 +32,7 @@ MAIN="$(cat "$A/.main" 2>/dev/null || echo main)"
 SHARED="settings.json settings.local.json CLAUDE.md hooks commands agents skills plugins
 output-styles mods projects history.jsonl todos file-history plans tasks transcripts paste-cache
 $(cat "$A/.shared" 2>/dev/null)"
-export CL_MAX_WEEKLY=$((100 - RESERVE))
+export CLEON_MAX_WEEKLY=$((100 - RESERVE))
 
 accounts() { # every account, in the order of $A/order, then any it leaves out
 	{ cat "$A/order" 2>/dev/null; echo "$MAIN"; ls "$A" 2>/dev/null; } | awk '!seen[$0]++' |
@@ -55,10 +56,10 @@ seen() { # seen <name>: when the status line last saved this login's quota (epoc
 	jq -r --arg acct "$(email "$1")" 'select((.account // $acct) == $acct) | .updated_at // empty | floor' \
 		"$(dir "$1")/quota.json" 2>/dev/null
 }
-relogin() { [ "$1" = "$MAIN" ] && echo "claude auth login" || echo "cl add $1"; } # how to log in again
+relogin() { [ "$1" = "$MAIN" ] && echo "claude auth login" || echo "cleon add $1"; } # how to log in again
 no_room() { # no_room <name>: why the account cannot take work now; prints nothing if it can
 	if [ "$(email "$1")" = "not logged in" ]; then echo "is not logged in ($(relogin "$1"))"
-	elif [ "$(used "$1" seven_day)" -ge "$CL_MAX_WEEKLY" ]; then echo "is down to its $RESERVE% weekly reserve"
+	elif [ "$(used "$1" seven_day)" -ge "$CLEON_MAX_WEEKLY" ]; then echo "is down to its $RESERVE% weekly reserve"
 	elif [ "$(used "$1" five_hour)" -ge 100 ]; then echo "used its 5-hour quota"; fi
 }
 span() { # span <seconds>: 2d 3h, 1h 12m or 5m
@@ -72,7 +73,7 @@ room_at() { # room_at <name>: when the account has room again (epoch); 0 if it h
 	local week wreset five freset t=0
 	read -r week wreset <<<"$(window "$1" seven_day)"
 	read -r five freset <<<"$(window "$1" five_hour)"
-	[ "$week" -ge "$CL_MAX_WEEKLY" ] && [ "$wreset" -gt "$t" ] && t=$wreset
+	[ "$week" -ge "$CLEON_MAX_WEEKLY" ] && [ "$wreset" -gt "$t" ] && t=$wreset
 	[ "$five" -ge 100 ] && [ "$freset" -gt "$t" ] && t=$freset
 	echo "$t"
 }
@@ -83,7 +84,7 @@ has_room() { [ -z "$(no_room "$1")" ]; }
 valid() { # valid <name...>: account names are lowercase, so two folders never differ by case only
 	local x
 	for x in "$@"; do
-		[[ "$x" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "cl: '$x' is not a valid name: use lowercase letters, digits and -" >&2; exit 2; }
+		[[ "$x" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "cleon: '$x' is not a valid name: use lowercase letters, digits and -" >&2; exit 2; }
 	done
 }
 
@@ -108,7 +109,7 @@ on() { # on <name> <cmd...>: run cmd with the account's config dir
 
 case "${1:-}" in
 add)
-	[ -n "${2:-}" ] && [ "$2" != "$MAIN" ] || { echo "usage: cl add <name>" >&2; exit 2; }
+	[ -n "${2:-}" ] && [ "$2" != "$MAIN" ] || { echo "usage: cleon add <name>" >&2; exit 2; }
 	valid "$2"
 	on "$2" claude auth login
 	login="$(email "$2")"
@@ -116,7 +117,7 @@ add)
 		[ "$other" != "$2" ] && [ "$login" != "not logged in" ] && [ "$(email "$other")" = "$login" ] || continue
 		on "$2" claude auth logout >/dev/null 2>&1
 		rm -r "${A:?}/$2"
-		echo "cl: $login is already account '$other'. Removed '$2'." >&2
+		echo "cleon: $login is already account '$other'. Removed '$2'." >&2
 		exit 1
 	done
 	exec "$0" ls ;;
@@ -140,12 +141,12 @@ ls)
 	}
 	first=""
 	for n in $(accounts); do has_room "$n" && { first=$n; break; }; done
-	printf '\n %sClaude accounts%s   %sorder = priority · cl starts on the first with room · auto-resume %s · reserve %s%%%s\n\n' \
+	printf '\n %scleon accounts%s   %sorder = priority · cleon starts on the first with room · auto-resume %s · reserve %s%%%s\n\n' \
 		"$B" "$X" "$D" "$(auto_resume)" "$RESERVE" "$X"
 	for n in $(accounts); do
 		[ "$n" = "$first" ] && mark="${GRN}●${X}" || mark="${D}○${X}"
 		printf ' %s %s%-11s%s %s' "$mark" "$B" "$n" "$X" "$(email "$n" | grep -v '^not logged in$')"
-		[ "$n" = "$first" ] && printf '   %s← cl starts here%s' "$GRN" "$X"
+		[ "$n" = "$first" ] && printf '   %s← cleon starts here%s' "$GRN" "$X"
 		printf '\n'
 		# The saved login, read locally; a quota the status line saved proves it worked then.
 		st="$(on "$n" claude auth status --json </dev/null 2>/dev/null)"
@@ -156,7 +157,7 @@ ls)
 		at="$(seen "$n")"
 		proof="not used yet"
 		[ -n "$at" ] && { [ $((now - at)) -lt 60 ] && proof="worked just now" || proof="worked $(span $((now - at))) ago"; }
-		printf '     %s✓ logged in%s   %s%s plan · %s%s\n' "$GRN" "$X" "$D" "$(jq -r '.subscriptionType // "unknown"' <<<"$st")" "$proof" "$X"
+		printf '     %s✓ logged in%s   %s%s%s%s\n' "$GRN" "$X" "$D" "$(jq -r '(.subscriptionType // empty) + " plan · "' <<<"$st")" "$proof" "$X"
 		if [ -z "$at" ]; then
 			printf '     %sno quota seen yet: it shows after the first chat on this account%s\n\n' "$D" "$X"
 			continue
@@ -164,31 +165,31 @@ ls)
 		read -r pct reset <<<"$(window "$n" five_hour)"
 		meter 5h "$pct" "$reset" 100
 		read -r pct reset <<<"$(window "$n" seven_day)"
-		meter week "$pct" "$reset" "$CL_MAX_WEEKLY"
+		meter week "$pct" "$reset" "$CLEON_MAX_WEEKLY"
 		why="$(no_room "$n")"
 		[ -n "$why" ] && printf '     %s⚠ %s%s\n' "$YEL" "$why" "$X"
 		printf '\n'
 	done
-	[ -n "$first" ] || printf ' %s⚠ every account is out of room: cl waits for the first reset; cl @<name> uses one anyway%s\n\n' "$RED" "$X"
+	[ -n "$first" ] || printf ' %s⚠ every account is out of room: cleon waits for the first reset; cleon @<name> uses one anyway%s\n\n' "$RED" "$X"
 	exit ;;
 name)
-	[ -n "${2:-}" ] || { echo "usage: cl name <name>" >&2; exit 2; }
+	[ -n "${2:-}" ] || { echo "usage: cleon name <name>" >&2; exit 2; }
 	valid "$2"
 	mkdir -p "$A" && echo "$2" >"$A/.main"
 	exec "$0" ls ;;
 reserve)
 	if [ -n "${2:-}" ]; then
-		[[ "$2" =~ ^(0|[1-9][0-9]?)$ ]] || { echo "usage: cl reserve [0-99]" >&2; exit 2; }
+		[[ "$2" =~ ^(0|[1-9][0-9]?)$ ]] || { echo "usage: cleon reserve [0-99]" >&2; exit 2; }
 		mkdir -p "$A" && echo "$2" >"$A/.reserve"
 		RESERVE=$2
 	fi
-	echo "weekly reserve: $RESERVE% (cl skips an account at $((100 - RESERVE))% weekly use)"
+	echo "weekly reserve: $RESERVE% (cleon skips an account at $((100 - RESERVE))% weekly use)"
 	exit ;;
 resume)
 	case "${2:-}" in
 	on | off) mkdir -p "$A" && echo "$2" >"$A/.resume" ;;
 	'') ;;
-	*) echo "usage: cl resume [on|off]" >&2; exit 2 ;;
+	*) echo "usage: cleon resume [on|off]" >&2; exit 2 ;;
 	esac
 	echo "auto-resume: $(auto_resume)"
 	exit ;;
@@ -202,7 +203,7 @@ esac
 list=($(accounts))
 n=${#list[@]}
 index() { local j=0; while [ "$j" -lt "$n" ] && [ "${list[$j]}" != "$1" ]; do j=$((j + 1)); done; echo "$j"; }
-RESET_MARGIN=15 # seconds after a reset before cl starts, so the server has reset too
+RESET_MARGIN=15 # seconds after a reset before cleon starts, so the server has reset too
 wait_for_room() { # wait_for_room <at least N seconds>: sleep until an account in the order has room; sets i
 	local start now next a t
 	start=$(date +%s)
@@ -210,7 +211,7 @@ wait_for_room() { # wait_for_room <at least N seconds>: sleep until an account i
 		now=$(date +%s)
 		if [ $((now - start)) -ge "$1" ]; then
 			i="$(next_with_room 0)"
-			[ "$i" -lt "$n" ] && { printf '\n' >&2; echo "cl: ${list[$i]} has room again." >&2; return; }
+			[ "$i" -lt "$n" ] && { printf '\n' >&2; echo "cleon: ${list[$i]} has room again." >&2; return; }
 		fi
 		# ponytail: with no known reset (a limit the status line never saw), look again in 30 min.
 		next=$((now + 1800))
@@ -234,17 +235,17 @@ next_with_room() { # next_with_room <index>: first account with room from there 
 case "${1:-}" in
 @*)
 	i="$(index "${1#@}")"
-	[ "$i" -lt "$n" ] || { echo "cl: no account '${1#@}'. Add it: cl add ${1#@}" >&2; exit 2; }
+	[ "$i" -lt "$n" ] || { echo "cleon: no account '${1#@}'. Add it: cleon add ${1#@}" >&2; exit 2; }
 	shift ;;
 *)
 	# The order is the priority: start on the first account with room.
 	i="$(next_with_room 0)"
 	[ "$i" -lt "$n" ] || wait_for_room 0
-	for ((k = 0; k < i; k++)); do echo "cl: ${list[$k]} $(no_room "${list[$k]}"). Starting on ${list[$i]}." >&2; done ;;
+	for ((k = 0; k < i; k++)); do echo "cleon: ${list[$k]} $(no_room "${list[$k]}"). Starting on ${list[$i]}." >&2; done ;;
 esac
 
 args=("$@")
-# Flags that set up the session, kept when cl resumes the chat on the next account.
+# Flags that set up the session, kept when cleon resumes the chat on the next account.
 # ponytail: a fixed list; add a flag here when a resumed chat loses one you use.
 keep=()
 for ((k = 0; k < ${#args[@]}; k++)); do
@@ -258,7 +259,7 @@ while :; do
 	name="${list[$i]}"
 	swap="$(mktemp)"
 	start=$SECONDS
-	CL_SWAP_FILE="$swap" on "$name" claude ${args[@]+"${args[@]}"}
+	CLEON_SWAP_FILE="$swap" on "$name" claude ${args[@]+"${args[@]}"}
 	rc=$?
 	read -r sid why <"$swap"
 	rm -f "$swap" "$swap.asked"
@@ -274,14 +275,15 @@ while :; do
 	esac
 	i="$(next_with_room $(((i + 1) % n)))"
 	if [ "$i" -ge "$n" ] || [ "$quick" -ge "$n" ]; then
-		echo "cl: $name $what. The chat is saved: cl --resume $sid" >&2
+		echo "cleon: $name $what. The chat is saved: cleon --resume $sid" >&2
 		# Limits hit with room on record mean the records are stale: give them 30 min.
 		if [ "$i" -lt "$n" ]; then wait_for_room 1800; else wait_for_room 0; fi
 		quick=0
 	fi
 	off=""
 	[ "$(auto_resume)" = on ] || off=" (auto-resume is off)"
-	echo "cl: $name $what. Continuing on ${list[$i]}$off." >&2
+	echo "cleon: $name $what. Continuing on ${list[$i]}$off." >&2
+	[ -t 2 ] && sleep 2 # time to read it: the next claude redraws the screen
 	# After a limit the turn broke off, so ask to go on; at the reserve the turn had finished.
 	args=(${keep[@]+"${keep[@]}"} --resume "$sid")
 	# A turn that ended at the reserve was done; the others broke off or paused, so say go on.

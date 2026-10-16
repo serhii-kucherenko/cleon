@@ -1,16 +1,16 @@
 #!/bin/bash
-# PostToolUse, Stop and StopFailure hook for sessions that `cl` started (CL_SWAP_FILE set); any
+# PostToolUse, Stop and StopFailure hook for sessions that `cleon` started (CLEON_SWAP_FILE set); any
 # other session: does nothing. Near the weekly reserve it asks the agent to pause; then it ends
-# claude and tells cl why, so cl resumes the chat on the next account:
-#   PostToolUse, week at CL_MAX_WEEKLY% -> tells the agent to reach a safe point and end its turn
-#   Stop, week at CL_MAX_WEEKLY%        -> "paused" (after that message) or "reserve"
+# claude and tells cleon why, so cleon resumes the chat on the next account:
+#   PostToolUse, week at CLEON_MAX_WEEKLY% -> tells the agent to reach a safe point and end its turn
+#   Stop, week at CLEON_MAX_WEEKLY%        -> "paused" (after that message) or "reserve"
 #   StopFailure with a usage limit      -> "limit"
 #   StopFailure with a dead login       -> "login"
-[ -n "${CL_SWAP_FILE:-}" ] || exit 0
+[ -n "${CLEON_SWAP_FILE:-}" ] || exit 0
 input="$(cat)"
 config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-max="${CL_MAX_WEEKLY:-95}"
-asked="$CL_SWAP_FILE.asked" # the pause levels already sent to this claude
+max="${CLEON_MAX_WEEKLY:-95}"
+asked="$CLEON_SWAP_FILE.asked" # the pause levels already sent to this claude
 
 weekly() { # this login's weekly percent used, 0 when unknown
 	local login="$HOME/.claude.json" acct
@@ -21,8 +21,8 @@ weekly() { # this login's weekly percent used, 0 when unknown
 		 then .seven_day.used_percentage // 0 | floor else 0 end' "$config/quota.json" 2>/dev/null || echo 0
 }
 
-end_claude() { # end_claude <why>: hand cl the session id and the reason, then end claude
-	echo "$(printf '%s' "$input" | jq -r .session_id) $1" >"$CL_SWAP_FILE"
+end_claude() { # end_claude <why>: hand cleon the session id and the reason, then end claude
+	echo "$(printf '%s' "$input" | jq -r .session_id) $1" >"$CLEON_SWAP_FILE"
 	# The hook runs under a shell that claude started; end the nearest claude above it.
 	local p=$PPID
 	while [ "${p:-1}" -gt 1 ]; do
