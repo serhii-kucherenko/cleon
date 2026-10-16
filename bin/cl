@@ -1,0 +1,284 @@
+#!/bin/bash
+# cl - run claude on one of several Claude accounts, and keep the chat going when one runs out.
+#
+#   cl [@account] [claude args]   start claude on the first account with room (or the one named)
+#   cl add <name>                 add an account and log in to it
+#   cl ls                         list the accounts and their quota use; ● marks where cl starts
+#   cl order <name...>            set the order cl moves through the accounts in
+#   cl name <name>                name the ~/.claude account (default: main)
+#   cl resume [on|off]            after a switch, the next account carries on by itself (default on)
+#   cl help                       show this help
+#
+# The account named in ~/.claude-accounts/.main (default "main") is ~/.claude. Every other account is a CLAUDE_CONFIG_DIR under
+# ~/.claude-accounts/<name> that has its own login and .claude.json, and links the parts in SHARED
+# (history, settings, hooks, skills) to ~/.claude. So any account can --resume any chat. To share
+# more, list the extra names in ~/.claude-accounts/.shared, one per line.
+#
+# Each account keeps RESERVE percent of its weekly quota. cl skips an account that is down to
+# its reserve or has used its 5-hour quota. When the account gets there mid-turn,
+# hooks/account-swap.sh (install.sh registers it) asks the agent to pause at a safe point with a handoff, and ends claude
+# when the turn ends; it also ends claude on a usage limit or a dead login. cl then resumes the
+# same chat on the next account, and with auto-resume on, tells it to carry on.
+# The weekly figure is the last one the status line saved in <config dir>/quota.json; a figure
+# saved for another account (after a /login to it) counts as unknown.
+set -u
+RESERVE=5
+A="$HOME/.claude-accounts"
+MAIN="$(cat "$A/.main" 2>/dev/null || echo main)"
+# Never a login, a quota or a cache: each account keeps its own.
+SHARED="settings.json settings.local.json CLAUDE.md hooks commands agents skills plugins
+output-styles mods projects history.jsonl todos file-history plans tasks transcripts paste-cache
+$(cat "$A/.shared" 2>/dev/null)"
+export CL_MAX_WEEKLY=$((100 - RESERVE))
+
+accounts() { # every account, in the order of $A/order, then any it leaves out
+	{ cat "$A/order" 2>/dev/null; echo "$MAIN"; ls "$A" 2>/dev/null; } | awk '!seen[$0]++' |
+		while read -r n; do [ "$n" = "$MAIN" ] || [ -d "$A/$n" ] && echo "$n"; done
+}
+dir() { [ "$1" = "$MAIN" ] && echo "$HOME/.claude" || echo "$A/$1"; }
+email() { # email <name>: the account's login, from its .claude.json
+	local f="$A/$1/.claude.json"
+	[ "$1" = "$MAIN" ] && f="$HOME/.claude.json"
+	jq -r '.oauthAccount.emailAddress // "not logged in"' "$f" 2>/dev/null || echo "not logged in"
+}
+
+window() { # window <name> <seven_day|five_hour>: "<percent used> <resets_at>"; "0 0" if unknown, reset or another login's
+	jq -r --argjson now "$(date +%s)" --arg acct "$(email "$1")" --arg w "$2" \
+		'if (.account // $acct) != $acct then "0 0" else .[$w] // {} |
+		 if (.resets_at // 0) > $now then "\(.used_percentage // 0 | floor) \(.resets_at | floor)" else "0 0" end end' \
+		"$(dir "$1")/quota.json" 2>/dev/null | grep . || echo "0 0"
+}
+used() { window "$1" "$2" | cut -d' ' -f1; }
+seen() { # seen <name>: when the status line last saved this login's quota (epoch), else nothing
+	jq -r --arg acct "$(email "$1")" 'select((.account // $acct) == $acct) | .updated_at // empty | floor' \
+		"$(dir "$1")/quota.json" 2>/dev/null
+}
+relogin() { [ "$1" = "$MAIN" ] && echo "claude auth login" || echo "cl add $1"; } # how to log in again
+no_room() { # no_room <name>: why the account cannot take work now; prints nothing if it can
+	if [ "$(email "$1")" = "not logged in" ]; then echo "is not logged in ($(relogin "$1"))"
+	elif [ "$(used "$1" seven_day)" -ge "$CL_MAX_WEEKLY" ]; then echo "is down to its $RESERVE% weekly reserve"
+	elif [ "$(used "$1" five_hour)" -ge 100 ]; then echo "used its 5-hour quota"; fi
+}
+span() { # span <seconds>: 2d 3h, 1h 12m or 5m
+	local t=$1
+	if [ "$t" -ge 86400 ]; then echo "$((t / 86400))d $((t % 86400 / 3600))h"
+	elif [ "$t" -ge 3600 ]; then echo "$((t / 3600))h $((t % 3600 / 60))m"
+	else echo "$((t / 60))m"; fi
+}
+room_at() { # room_at <name>: when the account has room again (epoch); 0 if it has room or no data; nothing if never
+	[ "$(email "$1")" = "not logged in" ] && return
+	local week wreset five freset t=0
+	read -r week wreset <<<"$(window "$1" seven_day)"
+	read -r five freset <<<"$(window "$1" five_hour)"
+	[ "$week" -ge "$CL_MAX_WEEKLY" ] && [ "$wreset" -gt "$t" ] && t=$wreset
+	[ "$five" -ge 100 ] && [ "$freset" -gt "$t" ] && t=$freset
+	echo "$t"
+}
+clock() { date -r "$1" +%H:%M 2>/dev/null || date -d "@$1" +%H:%M; } # BSD, then GNU date
+auto_resume() { cat "$A/.resume" 2>/dev/null || echo on; }
+has_room() { [ -z "$(no_room "$1")" ]; }
+
+valid() { # valid <name...>: account names are lowercase, so two folders never differ by case only
+	local x
+	for x in "$@"; do
+		[[ "$x" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "cl: '$x' is not a valid name: use lowercase letters, digits and -" >&2; exit 2; }
+	done
+}
+
+prepare() { # prepare <name>: link the shared parts into the account; prints its config dir
+	[ "$1" = "$MAIN" ] && return
+	local d="$A/$1" n
+	mkdir -p "$d"
+	for n in $SHARED; do
+		[ -e "$HOME/.claude/$n" ] && [ ! -e "$d/$n" ] && [ ! -L "$d/$n" ] && ln -s "$HOME/.claude/$n" "$d/$n"
+	done
+	# Its own .claude.json: same MCP servers and trusted folders, but not the login in ~/.claude.
+	[ -e "$d/.claude.json" ] || jq 'del(.oauthAccount)' "$HOME/.claude.json" >"$d/.claude.json"
+	echo "$d"
+}
+
+on() { # on <name> <cmd...>: run cmd with the account's config dir
+	local d
+	d="$(prepare "$1")"
+	shift
+	if [ -n "$d" ]; then CLAUDE_CONFIG_DIR="$d" "$@"; else env -u CLAUDE_CONFIG_DIR "$@"; fi
+}
+
+case "${1:-}" in
+add)
+	[ -n "${2:-}" ] && [ "$2" != "$MAIN" ] || { echo "usage: cl add <name>" >&2; exit 2; }
+	valid "$2"
+	on "$2" claude auth login
+	login="$(email "$2")"
+	for other in $(accounts); do
+		[ "$other" != "$2" ] && [ "$login" != "not logged in" ] && [ "$(email "$other")" = "$login" ] || continue
+		on "$2" claude auth logout >/dev/null 2>&1
+		rm -r "${A:?}/$2"
+		echo "cl: $login is already account '$other'. Removed '$2'." >&2
+		exit 1
+	done
+	exec "$0" ls ;;
+help | -h)
+	sed -n '4,10p' "$0" | cut -c3-
+	exit ;;
+ls)
+	if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+		B=$'\e[1m' D=$'\e[2m' X=$'\e[0m' RED=$'\e[31m' YEL=$'\e[33m' GRN=$'\e[32m'
+	else B='' D='' X='' RED='' YEL='' GRN=''; fi
+	now=$(date +%s)
+	cells() { local i out=''; for ((i = 0; i < $2; i++)); do out+=$1; done; printf '%s' "$out"; }
+	meter() { # meter <label> <percent> <resets_at> <limit>: a 20-cell bar, red from limit
+		local fill=$((($2 * 20 + 50) / 100)) c=$GRN
+		[ "$fill" -gt 20 ] && fill=20
+		[ "$2" -ge $(($4 - 25)) ] && c=$YEL
+		[ "$2" -ge "$4" ] && c=$RED
+		printf '     %-5s %s%s%s%s%s %s%3d%%%s' "$1" "$c" "$(cells █ "$fill")" "$D" "$(cells ░ $((20 - fill)))" "$X" "$c" "$2" "$X"
+		[ "$3" -gt 0 ] && printf '   %sresets in %s%s' "$D" "$(span $(($3 - now)))" "$X"
+		printf '\n'
+	}
+	first=""
+	for n in $(accounts); do has_room "$n" && { first=$n; break; }; done
+	printf '\n %sClaude accounts%s   %sorder = priority · cl starts on the first with room · auto-resume %s%s\n\n' \
+		"$B" "$X" "$D" "$(auto_resume)" "$X"
+	for n in $(accounts); do
+		[ "$n" = "$first" ] && mark="${GRN}●${X}" || mark="${D}○${X}"
+		printf ' %s %s%-11s%s %s' "$mark" "$B" "$n" "$X" "$(email "$n" | grep -v '^not logged in$')"
+		[ "$n" = "$first" ] && printf '   %s← cl starts here%s' "$GRN" "$X"
+		printf '\n'
+		# The saved login, read locally; a quota the status line saved proves it worked then.
+		st="$(on "$n" claude auth status --json </dev/null 2>/dev/null)"
+		if [ "$(jq -r '.loggedIn' <<<"$st" 2>/dev/null)" != true ]; then
+			printf '     %s✗ not logged in%s   %slog in: %s%s\n\n' "$RED" "$X" "$D" "$(relogin "$n")" "$X"
+			continue
+		fi
+		at="$(seen "$n")"
+		proof="not used yet"
+		[ -n "$at" ] && { [ $((now - at)) -lt 60 ] && proof="worked just now" || proof="worked $(span $((now - at))) ago"; }
+		printf '     %s✓ logged in%s   %s%s plan · %s%s\n' "$GRN" "$X" "$D" "$(jq -r '.subscriptionType // "unknown"' <<<"$st")" "$proof" "$X"
+		if [ -z "$at" ]; then
+			printf '     %sno quota seen yet: it shows after the first chat on this account%s\n\n' "$D" "$X"
+			continue
+		fi
+		read -r pct reset <<<"$(window "$n" five_hour)"
+		meter 5h "$pct" "$reset" 100
+		read -r pct reset <<<"$(window "$n" seven_day)"
+		meter week "$pct" "$reset" "$CL_MAX_WEEKLY"
+		why="$(no_room "$n")"
+		[ -n "$why" ] && printf '     %s⚠ %s%s\n' "$YEL" "$why" "$X"
+		printf '\n'
+	done
+	[ -n "$first" ] || printf ' %s⚠ every account is out of room: cl waits for the first reset; cl @<name> uses one anyway%s\n\n' "$RED" "$X"
+	exit ;;
+name)
+	[ -n "${2:-}" ] || { echo "usage: cl name <name>" >&2; exit 2; }
+	valid "$2"
+	mkdir -p "$A" && echo "$2" >"$A/.main"
+	exec "$0" ls ;;
+resume)
+	case "${2:-}" in
+	on | off) mkdir -p "$A" && echo "$2" >"$A/.resume" ;;
+	'') ;;
+	*) echo "usage: cl resume [on|off]" >&2; exit 2 ;;
+	esac
+	echo "auto-resume: $(auto_resume)"
+	exit ;;
+order)
+	shift
+	valid "$@"
+	mkdir -p "$A" && printf '%s\n' "$@" >"$A/order"
+	exec "$0" ls ;;
+esac
+
+list=($(accounts))
+n=${#list[@]}
+index() { local j=0; while [ "$j" -lt "$n" ] && [ "${list[$j]}" != "$1" ]; do j=$((j + 1)); done; echo "$j"; }
+RESET_MARGIN=15 # seconds after a reset before cl starts, so the server has reset too
+wait_for_room() { # wait_for_room <at least N seconds>: sleep until an account in the order has room; sets i
+	local start now next a t
+	start=$(date +%s)
+	while :; do
+		now=$(date +%s)
+		if [ $((now - start)) -ge "$1" ]; then
+			i="$(next_with_room 0)"
+			[ "$i" -lt "$n" ] && { printf '\n' >&2; echo "cl: ${list[$i]} has room again." >&2; return; }
+		fi
+		# ponytail: with no known reset (a limit the status line never saw), look again in 30 min.
+		next=$((now + 1800))
+		[ $((start + $1)) -gt "$now" ] && [ $((start + $1)) -lt "$next" ] && next=$((start + $1))
+		for a in "${list[@]}"; do
+			t="$(room_at "$a")"
+			[ -n "$t" ] && [ "$t" -gt 0 ] && [ $((t + RESET_MARGIN)) -lt "$next" ] && next=$((t + RESET_MARGIN))
+		done
+		[ "$next" -gt "$now" ] || next=$((now + 1))
+		printf '\rcl: every account is out of room. Waiting until %s (in %s). Ctrl+C stops.\033[K' \
+			"$(clock "$next")" "$(span $((next - now)))" >&2
+		sleep $((next - now < 60 ? next - now : 60))
+	done
+}
+next_with_room() { # next_with_room <index>: first account with room from there on, or n
+	local k j
+	for ((k = 0; k < n; k++)); do j=$((($1 + k) % n)); has_room "${list[$j]}" && { echo "$j"; return; }; done
+	echo "$n"
+}
+
+case "${1:-}" in
+@*)
+	i="$(index "${1#@}")"
+	[ "$i" -lt "$n" ] || { echo "cl: no account '${1#@}'. Add it: cl add ${1#@}" >&2; exit 2; }
+	shift ;;
+*)
+	# The order is the priority: start on the first account with room.
+	i="$(next_with_room 0)"
+	[ "$i" -lt "$n" ] || wait_for_room 0
+	for ((k = 0; k < i; k++)); do echo "cl: ${list[$k]} $(no_room "${list[$k]}"). Starting on ${list[$i]}." >&2; done ;;
+esac
+
+args=("$@")
+# Flags that set up the session, kept when cl resumes the chat on the next account.
+# ponytail: a fixed list; add a flag here when a resumed chat loses one you use.
+keep=()
+for ((k = 0; k < ${#args[@]}; k++)); do
+	case "${args[$k]}" in
+	--dangerously-skip-permissions | --*=*) keep+=("${args[$k]}") ;;
+	--model | --permission-mode | --agent | --add-dir | --settings) keep+=("${args[$k]}" "${args[$((k + 1))]:-}"); k=$((k + 1)) ;;
+	esac
+done
+quick=0 # swaps in a row, each soon after the start
+while :; do
+	name="${list[$i]}"
+	swap="$(mktemp)"
+	start=$SECONDS
+	CL_SWAP_FILE="$swap" on "$name" claude ${args[@]+"${args[@]}"}
+	rc=$?
+	read -r sid why <"$swap"
+	rm -f "$swap" "$swap.asked"
+	[ -n "${sid:-}" ] || exit "$rc"
+	stty sane 2>/dev/null
+	# ponytail: "soon" is 2 minutes; a swap that late means the account did work first.
+	[ $((SECONDS - start)) -lt 120 ] && quick=$((quick + 1)) || quick=1
+	case "$why" in
+	reserve) what="is down to its $RESERVE% weekly reserve" ;;
+	paused) what="paused its work at its $RESERVE% weekly reserve" ;;
+	login) what="has a login that no longer works ($(relogin "$name"))" ;;
+	*) what="hit its limit" ;;
+	esac
+	i="$(next_with_room $(((i + 1) % n)))"
+	if [ "$i" -ge "$n" ] || [ "$quick" -ge "$n" ]; then
+		echo "cl: $name $what. The chat is saved: cl --resume $sid" >&2
+		# Limits hit with room on record mean the records are stale: give them 30 min.
+		if [ "$i" -lt "$n" ]; then wait_for_room 1800; else wait_for_room 0; fi
+		quick=0
+	fi
+	off=""
+	[ "$(auto_resume)" = on ] || off=" (auto-resume is off)"
+	echo "cl: $name $what. Continuing on ${list[$i]}$off." >&2
+	# After a limit the turn broke off, so ask to go on; at the reserve the turn had finished.
+	args=(${keep[@]+"${keep[@]}"} --resume "$sid")
+	# A turn that ended at the reserve was done; the others broke off or paused, so say go on.
+	if [ -z "$off" ]; then
+		case "$why" in
+		paused) args+=("Resume the paused work: the last account reached its weekly reserve. Carry on from your handoff. If nothing is left, say so in one line.") ;;
+		limit | login) args+=("Continue where you stopped.") ;;
+		esac
+	fi
+done
