@@ -104,7 +104,7 @@ cl ls
 ```
 
 ```text
- Claude accounts   order = priority · cl starts on the first with room · auto-resume on
+ Claude accounts   order = priority · cl starts on the first with room · auto-resume on · reserve 5%
 
  ● work        you@company.com   ← cl starts here
      ✓ logged in   max plan · worked 3m ago
@@ -139,6 +139,7 @@ cl --dangerously-skip-permissions    # flags pass through, and stay after a swit
 | `cl order <name...>` | Set the order `cl` uses the accounts in. |
 | `cl name <name>` | Name the `~/.claude` account (default `main`). |
 | `cl resume [on\|off]` | After a switch, the next account carries on by itself (`on`, the default), or opens the chat and waits for you (`off`). |
+| `cl reserve [percent]` | Show or set the weekly quota each account keeps back (default 5). |
 | `cl help` | Show the commands. |
 
 ## What happens at a limit
@@ -151,8 +152,19 @@ cl --dangerously-skip-permissions    # flags pass through, and stay after a swit
 | The login stopped working | Same as a limit. Log in again with `cl add <name>`. | `cl: work has a login that no longer works (cl add work).` |
 | Every account is out | Waits in the same terminal until the first reset. Ctrl+C stops the wait. | `cl: every account is out of room. Waiting until 14:05 (in 1h 12m).` |
 
-The 5% weekly reserve keeps each account usable for small jobs. To change it, edit `RESERVE` at the
-top of `bin/cl`.
+The 5% weekly reserve keeps each account usable for small jobs. To change it for all accounts:
+
+```bash
+cl reserve 15
+```
+
+```text
+weekly reserve: 15% (cl skips an account at 85% weekly use)
+```
+
+The value is saved in `~/.claude-accounts/.reserve`. A `cl` that runs now keeps its old value. The
+next `cl` you start uses the new one. `cl reserve 0` turns the reserve off: `cl` then switches only
+at a hard limit.
 
 ## Share more files between accounts
 
@@ -166,7 +178,7 @@ echo "my-notes.md" >> ~/.claude-accounts/.shared
 
 `cl` links them the next time it starts each account.
 
-## Use with Superset
+## Use with [Superset](https://superset.sh)
 
 Set the Claude agent command to `cl` (Settings, Agents, Claude, Agent command). Then every Claude
 tab, resume and fork goes through `cl`. Leave the account in Superset's Usage tab unset: Superset

@@ -7,6 +7,7 @@
 #   cl order <name...>            set the order cl moves through the accounts in
 #   cl name <name>                name the ~/.claude account (default: main)
 #   cl resume [on|off]            after a switch, the next account carries on by itself (default on)
+#   cl reserve [percent]          the weekly quota each account keeps back (default 5)
 #   cl help                       show this help
 #
 # The account named in ~/.claude-accounts/.main (default "main") is ~/.claude. Every other account is a CLAUDE_CONFIG_DIR under
@@ -14,7 +15,7 @@
 # (history, settings, hooks, skills) to ~/.claude. So any account can --resume any chat. To share
 # more, list the extra names in ~/.claude-accounts/.shared, one per line.
 #
-# Each account keeps RESERVE percent of its weekly quota. cl skips an account that is down to
+# Each account keeps RESERVE percent of its weekly quota (cl reserve sets it). cl skips an account that is down to
 # its reserve or has used its 5-hour quota. When the account gets there mid-turn,
 # hooks/account-swap.sh (install.sh registers it) asks the agent to pause at a safe point with a handoff, and ends claude
 # when the turn ends; it also ends claude on a usage limit or a dead login. cl then resumes the
@@ -22,8 +23,9 @@
 # The weekly figure is the last one the status line saved in <config dir>/quota.json; a figure
 # saved for another account (after a /login to it) counts as unknown.
 set -u
-RESERVE=5
 A="$HOME/.claude-accounts"
+RESERVE="$(cat "$A/.reserve" 2>/dev/null)"
+[[ "$RESERVE" =~ ^(0|[1-9][0-9]?)$ ]] || RESERVE=5 # 0 to 99, no leading zero (bash reads 08 as octal)
 MAIN="$(cat "$A/.main" 2>/dev/null || echo main)"
 # Never a login, a quota or a cache: each account keeps its own.
 SHARED="settings.json settings.local.json CLAUDE.md hooks commands agents skills plugins
@@ -119,7 +121,7 @@ add)
 	done
 	exec "$0" ls ;;
 help | -h)
-	sed -n '4,10p' "$0" | cut -c3-
+	sed -n '4,11p' "$0" | cut -c3-
 	exit ;;
 ls)
 	if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -138,8 +140,8 @@ ls)
 	}
 	first=""
 	for n in $(accounts); do has_room "$n" && { first=$n; break; }; done
-	printf '\n %sClaude accounts%s   %sorder = priority · cl starts on the first with room · auto-resume %s%s\n\n' \
-		"$B" "$X" "$D" "$(auto_resume)" "$X"
+	printf '\n %sClaude accounts%s   %sorder = priority · cl starts on the first with room · auto-resume %s · reserve %s%%%s\n\n' \
+		"$B" "$X" "$D" "$(auto_resume)" "$RESERVE" "$X"
 	for n in $(accounts); do
 		[ "$n" = "$first" ] && mark="${GRN}●${X}" || mark="${D}○${X}"
 		printf ' %s %s%-11s%s %s' "$mark" "$B" "$n" "$X" "$(email "$n" | grep -v '^not logged in$')"
@@ -174,6 +176,14 @@ name)
 	valid "$2"
 	mkdir -p "$A" && echo "$2" >"$A/.main"
 	exec "$0" ls ;;
+reserve)
+	if [ -n "${2:-}" ]; then
+		[[ "$2" =~ ^(0|[1-9][0-9]?)$ ]] || { echo "usage: cl reserve [0-99]" >&2; exit 2; }
+		mkdir -p "$A" && echo "$2" >"$A/.reserve"
+		RESERVE=$2
+	fi
+	echo "weekly reserve: $RESERVE% (cl skips an account at $((100 - RESERVE))% weekly use)"
+	exit ;;
 resume)
 	case "${2:-}" in
 	on | off) mkdir -p "$A" && echo "$2" >"$A/.resume" ;;

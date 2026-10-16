@@ -213,6 +213,12 @@ class AccountSwapTest(unittest.TestCase):
         self.assertIn(".claude/hooks/statusline.py", settings["statusLine"]["command"])
         self.assertNotIn("account-swap.sh", json.dumps(settings))
 
+    def test_the_reserve_can_be_changed(self):
+        subprocess.run([str(CL), "reserve", "60"], env=self.env, check=True, capture_output=True)
+        quota(self.home / ".claude" / "quota.json", 50)
+        _, out = run_in_terminal([str(CL), "--version"], self.env, self.cwd)
+        self.assertIn("cl: main is down to its 60% weekly reserve. Starting on b.", out)
+
     def test_an_upper_case_name_is_refused(self):
         run = subprocess.run([str(CL), "add", "WORK"], env=self.env, capture_output=True,
                              text=True)
