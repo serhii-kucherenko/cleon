@@ -134,9 +134,12 @@ class AccountSwapTest(unittest.TestCase):
         self.cwd.mkdir()
         claude = self.home / ".claude"
         claude.mkdir()
+        # Your own status line, at the same file name as cl's: install.sh must keep it.
+        (claude / "hooks").mkdir()
+        (claude / "hooks" / "statusline.py").write_text("print('mine')\n")
         (claude / "settings.json").write_text(json.dumps({
-            "skipDangerousModePermissionPrompt": True,
-            "statusLine": {"type": "command", "command": "echo mine"}}))
+            "skipDangerousModePermissionPrompt": True, "statusLine": {
+                "type": "command", "command": f'python3 "{claude}/hooks/statusline.py"'}}))
         config = json.loads((REAL / ".claude.json").read_text())
         config["projects"] = {str(self.cwd): {"hasTrustDialogAccepted": True}}
         (self.home / ".claude.json").write_text(json.dumps(config))
@@ -207,7 +210,7 @@ class AccountSwapTest(unittest.TestCase):
         subprocess.run([str(REPO / "install.sh"), "--uninstall"], env=self.env, check=True,
                        capture_output=True)
         settings = json.loads((self.home / ".claude" / "settings.json").read_text())
-        self.assertEqual(settings["statusLine"]["command"], "echo mine")
+        self.assertIn(".claude/hooks/statusline.py", settings["statusLine"]["command"])
         self.assertNotIn("account-swap.sh", json.dumps(settings))
 
     def test_an_upper_case_name_is_refused(self):
