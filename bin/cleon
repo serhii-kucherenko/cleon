@@ -33,6 +33,10 @@ SHARED="settings.json settings.local.json CLAUDE.md hooks commands agents skills
 output-styles mods projects history.jsonl todos file-history plans tasks transcripts paste-cache
 $(cat "$A/.shared" 2>/dev/null)"
 export CLEON_MAX_WEEKLY=$((100 - RESERVE))
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac # Git Bash on Windows
+# Windows jq ends each line with \r\n: drop the \r, so numbers compare.
+[ -n "$windows" ] && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
+winpath() { if [ -n "$windows" ]; then cygpath -m "$1"; else echo "$1"; fi; } # C:/Users/... for claude.exe
 
 accounts() { # every account, in the order of $A/order, then any it leaves out
 	{ cat "$A/order" 2>/dev/null; echo "$MAIN"; ls "$A" 2>/dev/null; } | awk '!seen[$0]++' |
@@ -88,12 +92,23 @@ valid() { # valid <name...>: account names are lowercase, so two folders never d
 	done
 }
 
+share() { # share <target> <link>: a symlink; on Windows without Developer Mode, a junction or a hard link
+	[ -n "$windows" ] || { ln -s "$1" "$2"; return; }
+	MSYS=winsymlinks:nativestrict CYGWIN=winsymlinks:nativestrict ln -s "$1" "$2" 2>/dev/null && return
+	if [ -d "$1" ]; then
+		MSYS_NO_PATHCONV=1 cmd /c mklink /J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null
+	else
+		# ponytail: a hard link splits when a program saves the file anew; Developer Mode gives real links.
+		ln "$1" "$2" && echo "cleon: $2 is a hard link. Turn on Windows Developer Mode for real links." >&2
+	fi
+}
+
 prepare() { # prepare <name>: link the shared parts into the account; prints its config dir
 	[ "$1" = "$MAIN" ] && return
 	local d="$A/$1" n
 	mkdir -p "$d"
 	for n in $SHARED; do
-		[ -e "$HOME/.claude/$n" ] && [ ! -e "$d/$n" ] && [ ! -L "$d/$n" ] && ln -s "$HOME/.claude/$n" "$d/$n"
+		[ -e "$HOME/.claude/$n" ] && [ ! -e "$d/$n" ] && [ ! -L "$d/$n" ] && share "$HOME/.claude/$n" "$d/$n"
 	done
 	# Its own .claude.json: same MCP servers and trusted folders, but not the login in ~/.claude.
 	[ -e "$d/.claude.json" ] || jq 'del(.oauthAccount)' "$HOME/.claude.json" >"$d/.claude.json"
@@ -104,7 +119,7 @@ on() { # on <name> <cmd...>: run cmd with the account's config dir
 	local d
 	d="$(prepare "$1")"
 	shift
-	if [ -n "$d" ]; then CLAUDE_CONFIG_DIR="$d" "$@"; else env -u CLAUDE_CONFIG_DIR "$@"; fi
+	if [ -n "$d" ]; then CLAUDE_CONFIG_DIR="$(winpath "$d")" "$@"; else env -u CLAUDE_CONFIG_DIR "$@"; fi
 }
 
 case "${1:-}" in
@@ -259,7 +274,7 @@ while :; do
 	name="${list[$i]}"
 	swap="$(mktemp)"
 	start=$SECONDS
-	CLEON_SWAP_FILE="$swap" on "$name" claude ${args[@]+"${args[@]}"}
+	CLEON_SWAP_FILE="$(winpath "$swap")" on "$name" claude ${args[@]+"${args[@]}"}
 	rc=$?
 	read -r sid why <"$swap"
 	rm -f "$swap" "$swap.asked"

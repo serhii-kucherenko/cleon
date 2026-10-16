@@ -64,7 +64,9 @@ def main():
     save_quota(limits)
     command = NEXT.read_text().strip() if NEXT.exists() else ''
     if command:
-        sys.stdout.write(subprocess.run(command, shell=True, input=raw, text=True,
+        # Claude Code runs commands with Git Bash on Windows, so the old one may be bash too.
+        run = ['bash', '-c', command] if os.name == 'nt' else command
+        sys.stdout.write(subprocess.run(run, shell=os.name != 'nt', input=raw, text=True,
                                         capture_output=True).stdout)
         return
     limits = limits or saved()

@@ -3,7 +3,7 @@
   <p align="center"><strong>Run Claude Code on all your Claude accounts. When one runs out, the next one carries on the same chat.</strong></p>
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg" alt="Platform: macOS | Linux">
+    <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platform: macOS | Linux | Windows">
     <img src="https://img.shields.io/badge/shell-bash-4EAA25.svg" alt="Shell: bash">
     <a href="https://code.claude.com"><img src="https://img.shields.io/badge/for-Claude%20Code-D97757.svg" alt="For Claude Code"></a>
   </p>
@@ -54,6 +54,7 @@ spent, the next one takes the throne, and the empire carries on.
 - **📊 One view of all quota.** `cleon ls` shows each account's 5-hour and weekly use, with reset times.
 - **⏳ Waits for you.** When every account is out, `cleon` waits for the first reset and carries on there.
 - **🧩 One setup.** All accounts share your settings, hooks, skills, plugins and chat history. Each keeps its own login.
+- **🖥️ Every system.** macOS, Linux, WSL and Windows (Git Bash). `cleon` finds the system by itself.
 - **🔒 Local only.** Plain bash and a small Python status line. No server, no API keys, nothing leaves your machine.
 
 ## 🏗️ Claude Code alone vs Claude Code + cleon
@@ -283,10 +284,23 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 
 ## 📋 Requirements
 
-- macOS or Linux, with `bash`.
 - [Claude Code](https://code.claude.com), logged in once in the normal way. Tested on 2.1.301.
-- `jq` (`brew install jq` or `apt install jq`) and `python3`.
+- `bash`, `jq` and Python 3.
 - Two or more Claude accounts on a Pro or Max plan. Claude Code reports quota only for these plans.
+
+| System | Install the tools | Notes |
+|---|---|---|
+| **macOS** | `brew install jq` | Python 3 comes with the Xcode tools. |
+| **Linux** | `sudo apt install jq python3` | |
+| **WSL** | `sudo apt install jq python3` | Install Claude Code inside WSL too. Then it is the same as Linux. |
+| **Windows** | [Git for Windows](https://git-scm.com/download/win), then `winget install jqlang.jq` and `winget install Python.Python.3.12` | Run `cleon` in Git Bash. Turn on Developer Mode (Settings, System, For developers), so `cleon` can make real links. |
+
+`cleon` finds the system by itself, with `uname -s`. In Git Bash on Windows it ends `claude.exe`
+through Windows, passes `C:/...` paths to it, and links folders with junctions when it cannot
+make symlinks. On macOS, Linux and WSL it runs the plain Unix path.
+
+Windows support is new. To check your machine, run `bash tests/smoke.sh` in Git Bash. It needs
+`node`, and it does not need a login.
 
 ## 🩺 Troubleshooting
 
@@ -296,12 +310,14 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 | `cleon ls` says "no quota seen yet" | Run one chat on that account: `cleon @<name> "say hi"`. |
 | `cleon ls` says "not logged in" | It shows the command to log in again: `cleon add <name>`, or `claude auth login` for the `~/.claude` account. |
 | `cleon` does not switch at a limit | Check that the hook is registered: `grep cleon-swap ~/.claude/settings.json`. If not, run `install.sh` again. |
+| Windows: `cleon: ... is a hard link` | A hard link stops being shared when a program saves the file anew. Turn on Developer Mode, delete that file in the account folder, and start `cleon` again. It makes a real link. |
 | A resumed chat lost a flag | `cleon` keeps `--dangerously-skip-permissions`, `--model`, `--permission-mode`, `--agent`, `--add-dir`, `--settings` and any `--flag=value`. Add others to the `keep` list in `bin/cleon`. |
 
 ## 🧑‍💻 Development
 
 ```bash
-python3 tests/test_cleon.py     # end-to-end tests
+python3 tests/test_cleon.py     # end-to-end tests (macOS and Linux)
+bash tests/smoke.sh             # the parts that differ per system (also Windows Git Bash)
 vhs demo/cleon.tape             # makes demo/cleon.gif again
 ```
 

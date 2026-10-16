@@ -7,6 +7,9 @@
 #   StopFailure with a usage limit      -> "limit"
 #   StopFailure with a dead login       -> "login"
 [ -n "${CLEON_SWAP_FILE:-}" ] || exit 0
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac # Git Bash on Windows
+# Windows jq ends each line with \r\n: drop the \r, so numbers compare.
+[ -n "$windows" ] && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
 input="$(cat)"
 config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 max="${CLEON_MAX_WEEKLY:-95}"
@@ -24,6 +27,7 @@ weekly() { # this login's weekly percent used, 0 when unknown
 end_claude() { # end_claude <why>: hand cleon the session id and the reason, then end claude
 	echo "$(printf '%s' "$input" | jq -r .session_id) $1" >"$CLEON_SWAP_FILE"
 	# The hook runs under a shell that claude started; end the nearest claude above it.
+	[ -n "$windows" ] && { end_windows_claude; exit 0; }
 	local p=$PPID
 	while [ "${p:-1}" -gt 1 ]; do
 		case "$(/bin/ps -o comm= -p "$p")" in
@@ -31,6 +35,20 @@ end_claude() { # end_claude <why>: hand cleon the session id and the reason, the
 		esac
 		p="$(/bin/ps -o ppid= -p "$p" | tr -d ' ')"
 	done
+}
+
+end_windows_claude() { # Git Bash's ps cannot see claude.exe, a Windows process, so ask Windows
+	local ps1='$all = @{}; Get-CimInstance Win32_Process | ForEach-Object { $all[[int]$_.ProcessId] = $_ }
+		$p = [int]$env:CLEON_WINPID
+		for ($i = 0; $i -lt 30 -and $all.ContainsKey($p); $i++) {
+			$x = $all[$p]
+			if ($x.Name -eq "claude.exe" -or ($x.Name -eq "node.exe" -and $x.CommandLine -match "claude")) { $p; break }
+			$p = [int]$x.ParentProcessId
+		}' p
+	# -EncodedCommand takes the script as base64 UTF-16, so no quote in it is lost on the way.
+	p="$(CLEON_WINPID="$(cat "/proc/$$/winpid")" powershell.exe -NoProfile -NonInteractive \
+		-EncodedCommand "$(printf '%s' "$ps1" | iconv -t UTF-16LE | base64 -w0)" | tr -d '\r')"
+	[ -n "$p" ] && MSYS_NO_PATHCONV=1 taskkill /F /PID "$p" >/dev/null
 }
 
 case "$(printf '%s' "$input" | jq -r '.hook_event_name + ":" + (.error // "")')" in

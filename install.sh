@@ -12,9 +12,18 @@ SETTINGS="$HOME/.claude/settings.json"
 NEXT="${CLEON_HOME:-$HOME/.cleon}/.statusline"
 BIN="$HOME/.local/bin"
 
-for tool in claude jq python3; do
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac # Git Bash on Windows
+# Windows jq ends each line with \r\n: drop the \r, so numbers compare.
+[ -n "$windows" ] && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
+winpath() { if [ -n "$windows" ]; then cygpath -m "$1"; else echo "$1"; fi; }
+PY=python3 # Windows often has only "python", and a python3 that opens the Store
+"$PY" -c '' 2>/dev/null || PY=python
+for tool in claude jq "$PY"; do
 	command -v "$tool" >/dev/null || { echo "install.sh: '$tool' is missing. Install it, then run this again." >&2; exit 1; }
 done
+# On Windows, name the full path: claude.exe may not find Git Bash's bash or python on its own.
+run_sh=bash run_py=$PY
+[ -n "$windows" ] && run_sh="\"$(winpath "$(command -v bash)")\"" run_py="\"$(winpath "$(command -v "$PY")")\""
 mkdir -p "$HOME/.claude" "$(dirname "$NEXT")" "$BIN"
 [ -s "$SETTINGS" ] || echo '{}' >"$SETTINGS"
 cp "$SETTINGS" "$SETTINGS.bak"
@@ -38,7 +47,7 @@ if [ "${1:-}" = --uninstall ]; then
 	elif [ "$ours" -gt 0 ]; then
 		write 'del(.statusLine)'
 	fi
-	[ "$(readlink "$BIN/cleon" 2>/dev/null)" = "$REPO/bin/cleon" ] && rm -f "$BIN/cleon"
+	{ [ "$(readlink "$BIN/cleon" 2>/dev/null)" = "$REPO/bin/cleon" ] || grep -qF "$REPO/bin/cleon" "$BIN/cleon" 2>/dev/null; } && rm -f "$BIN/cleon"
 	echo "cleon is uninstalled. Your accounts are still in ~/.cleon."
 	exit
 fi
@@ -48,14 +57,18 @@ if [ -n "$old" ] && [ "$ours" -eq 0 ]; then
 	echo "$old" >"$NEXT"
 	echo "Your status line still shows. cleon-statusline.py runs it: $old"
 fi
-hook="bash \"$REPO/hooks/cleon-swap.sh\""
-write --arg h "$hook" --arg s "python3 \"$REPO/hooks/cleon-statusline.py\"" '
+hook="$run_sh \"$(winpath "$REPO")/hooks/cleon-swap.sh\""
+write --arg h "$hook" --arg s "$run_py \"$(winpath "$REPO")/hooks/cleon-statusline.py\"" '
 	{type: "command", command: $h, timeout: 10} as $cmd
 	| .hooks.PostToolUse += [{matcher: "*", hooks: [$cmd]}]
 	| .hooks.Stop += [{hooks: [$cmd]}]
 	| .hooks.StopFailure += [{hooks: [$cmd]}]
 	| .statusLine = {type: "command", command: $s}'
-ln -sf "$REPO/bin/cleon" "$BIN/cleon"
+if [ -n "$windows" ]; then # Git Bash's ln -s copies, and a copy would miss each git pull
+	printf '#!/bin/bash\nexec "%s" "$@"\n' "$REPO/bin/cleon" >"$BIN/cleon" && chmod +x "$BIN/cleon"
+else
+	ln -sf "$REPO/bin/cleon" "$BIN/cleon"
+fi
 
 echo "cleon is installed: $BIN/cleon -> $REPO/bin/cleon"
 echo "Old settings saved to $SETTINGS.bak"
