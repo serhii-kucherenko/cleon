@@ -2,6 +2,7 @@
   <h1 align="center">👑 cleon</h1>
   <p align="center"><strong>Run Claude Code on all your Claude accounts. When one runs out, the next one carries on the same chat.</strong></p>
   <p align="center">
+    <a href="https://github.com/serhii-kucherenko/cleon/actions/workflows/test.yml"><img src="https://github.com/serhii-kucherenko/cleon/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg" alt="Platform: macOS | Linux | Windows">
     <img src="https://img.shields.io/badge/shell-bash-4EAA25.svg" alt="Shell: bash">
@@ -299,8 +300,9 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 through Windows, passes `C:/...` paths to it, and links folders with junctions when it cannot
 make symlinks. On macOS, Linux and WSL it runs the plain Unix path.
 
-Windows support is new. To check your machine, run `bash tests/smoke.sh` in Git Bash. It needs
-`node`, and it does not need a login.
+CI runs `tests/smoke.sh` on Ubuntu, macOS and Windows at each push. It tests both Windows
+paths: with symlinks, and with junctions and hard links. To check your own machine, run
+`bash tests/smoke.sh` (in Git Bash on Windows). It needs `node`, and it does not need a login.
 
 ## 🩺 Troubleshooting
 
@@ -317,7 +319,7 @@ Windows support is new. To check your machine, run `bash tests/smoke.sh` in Git 
 
 ```bash
 python3 tests/test_cleon.py     # end-to-end tests (macOS and Linux)
-bash tests/smoke.sh             # the parts that differ per system (also Windows Git Bash)
+bash tests/smoke.sh             # the parts that differ per system; CI runs it on all three
 vhs demo/cleon.tape             # makes demo/cleon.gif again
 ```
 
