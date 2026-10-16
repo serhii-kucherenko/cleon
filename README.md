@@ -341,6 +341,53 @@ The demo also runs the real `cleon` and `claude`, against `demo/fake_api.py`. It
 This removes the link, the hook and the status line, and puts back your old status line. Your
 accounts stay in `~/.cleon`. Delete that folder to remove them too.
 
+## ⚠️ Known limits
+
+`cleon` moves the chat, its files and your setup. It cannot move what belongs to the Claude
+account itself. Read this before you rely on a switch in the middle of important work.
+
+### Logins and tools
+
+| Limit | Why | What to do |
+|---|---|---|
+| **MCP logins are per account.** An MCP server that needs a login (OAuth) asks again on each account. | The token is saved with the account's login: in the macOS Keychain, one entry per account folder, or in that folder's `.credentials.json` on Linux and Windows. | Log in once on each account: `cleon @personal`, then `/mcp`. |
+| **claude.ai connectors are per account.** Slack, Google Drive and other connectors come from the claude.ai account. | Each account has its own connector list on claude.ai. | Add the same connectors on each account. If not, a resumed chat can lose a tool it used before the switch. |
+| **New MCP servers do not spread.** A server you add later with `claude mcp add` (user scope) shows only on the account you added it on. | Each account gets a copy of `~/.claude.json` at its first use. After that, the copies are separate. | Add it on each account: `cleon @personal mcp add ...`. A project's `.mcp.json` works on all accounts, because it lives in the repo. |
+| **Org rules differ.** A work account can have managed settings, other models or other limits. | Each account keeps its own `remote-settings.json` and `policy-limits.json`. | Expect the rules to change after a switch. A `--model` that `cleon` keeps can fail on a plan that does not have that model. |
+
+### Things that live on claude.ai
+
+| Limit | Why | What to do |
+|---|---|---|
+| **Artifacts, Claude Docs, claude.ai projects and cloud sessions belong to one account.** After a switch, the agent cannot update an artifact that the first account published. | They are owned by the account that made them. | Share the artifact with edit access to your other accounts, or finish that part on one account (`cleon @work`). |
+| **Background jobs are per account.** A job started on one account does not show on another. | Each account keeps its own `jobs`, `sessions` and `daemon` folders. Chat history is shared, so `--resume` lists every chat. | Check jobs on the account that started them. |
+
+### Quota and cost
+
+| Limit | Why | What to do |
+|---|---|---|
+| **The quota figure is the last one seen on this machine.** Use on claude.ai, the desktop app or another computer does not count until the next `cleon` chat on that account. | Claude Code sends the quota only to the status line of a running chat. | `cleon` can start on an account that is already out. Then the first request fails, and `cleon` moves on by itself. |
+| **A switch loses the prompt cache.** The first reply on the next account reads the whole chat again, without the cache. | The prompt cache belongs to the account's organization. Accounts in different organizations do not share it. | In a long chat, the first reply after a switch is slower and uses more quota. |
+| **Each tool call runs the hook.** | The hook checks the quota after each tool call. | It adds about 50 ms per tool call (measured on an Apple Silicon Mac). |
+
+### How a switch happens
+
+| Limit | Why | What to do |
+|---|---|---|
+| **A hard limit can break a turn in the middle of a step.** | The usage limit stops the request at once. The 95% reserve exists to avoid this. | After "Continue where you stopped", check for half-done edits. Keep a reserve: `cleon reserve 5` or more. |
+| **A switch ends `claude`.** Shell commands it runs in the background, and its helper agents, can stop with it. | `cleon` must end `claude` to start it again on the next account. | Ask the agent in its handoff to start again what was running. |
+| **Only the terminal.** The desktop app, the VS Code and JetBrains extensions, and claude.ai/code do not use `cleon`. | Only a `claude` that `cleon` starts can switch. | Use `cleon` in a terminal, or set it as the agent command in [Superset](https://superset.sh). |
+| **`claude -p` (print mode) only switches at a hard limit, and the resumed chat opens in interactive mode.** | Print mode has no status line, so `cleon` never sees the quota. `cleon` does not keep `-p` after a switch. | Use `cleon` for interactive chats. |
+| **A 2-second pause at each switch.** | It gives you time to read the switch message before the next `claude` redraws the screen. | Nothing to do. |
+
+### Setup
+
+| Limit | Why | What to do |
+|---|---|---|
+| **Moving the accounts folder on macOS logs you out.** | The Keychain entry is tied to the folder path. | After you change `CLEON_HOME`, run `cleon add <name>` again for each account. |
+| **Windows without Developer Mode uses hard links for files.** A hard link stops being shared when a program saves the file anew. | Windows allows symlinks only with Developer Mode or admin rights. | Turn on Developer Mode. See [Troubleshooting](#-troubleshooting). |
+| **Use only accounts you may use.** | Each account is a separate Claude plan, under Anthropic's terms. | Do not share one account between people. |
+
 ## 📄 License
 
 [MIT](LICENSE)
