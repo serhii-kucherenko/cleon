@@ -16,7 +16,7 @@ jobs:
       run:
         shell: bash # Git Bash on Windows
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Scripts parse
         run: for f in bin/cleon hooks/cleon-swap.sh install.sh tests/smoke.sh demo/setup.sh; do bash -n "$f"; done
       - name: Smoke test

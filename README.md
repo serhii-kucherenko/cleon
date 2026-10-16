@@ -198,7 +198,6 @@ flowchart LR
 | `bin/cleon` | Picks an account, starts `claude` on it, and resumes the chat on the next account when told. |
 | `hooks/cleon-statusline.py` | Saves each account's quota to `<config dir>/quota.json`. Claude Code sends the quota only to the status line, so this is where `cleon` catches it. |
 | `hooks/cleon-swap.sh` | At the reserve, asks the agent to pause. At the end of that turn, or on a hard limit, it ends `claude` and tells `cleon` why. In a session that `cleon` did not start, it does nothing. |
-| `install.sh` | Links `cleon` and registers the hook and the status line in `~/.claude/settings.json`. |
 
 Your normal `~/.claude` login is the first account. Each other account is a folder
 `~/.cleon/<name>`, used as `CLAUDE_CONFIG_DIR`. It has its own login and its own
@@ -248,8 +247,6 @@ switches only at a hard limit.
 
 | Alternative | Limitation |
 |---|---|
-| **`/logout` and `/login` by hand** | The turn stops first. Then you find the chat again and explain where you were. |
-| **Two terminals with `CLAUDE_CONFIG_DIR`** | Two copies of your settings, hooks and skills. A chat from one account cannot be resumed on the other. |
 | **`claude setup-token`** | The token is for inference only. claude.ai connectors and Claude in Chrome do not load with it. |
 | **Pay for the API instead** | You pay for each token, on top of the plans you already have. |
 
@@ -296,13 +293,7 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 | **WSL** | `sudo apt install jq python3` | Install Claude Code inside WSL too. Then it is the same as Linux. |
 | **Windows** | [Git for Windows](https://git-scm.com/download/win), then `winget install jqlang.jq` and `winget install Python.Python.3.12` | Run `cleon` in Git Bash. Turn on Developer Mode (Settings, System, For developers), so `cleon` can make real links. |
 
-`cleon` finds the system by itself, with `uname -s`. In Git Bash on Windows it ends `claude.exe`
-through Windows, passes `C:/...` paths to it, and links folders with junctions when it cannot
-make symlinks. On macOS, Linux and WSL it runs the plain Unix path.
-
-CI runs `tests/smoke.sh` on Ubuntu, macOS and Windows at each push. It tests both Windows
-paths: with symlinks, and with junctions and hard links. To check your own machine, run
-`bash tests/smoke.sh` (in Git Bash on Windows). It needs `node`, and it does not need a login.
+`cleon` finds the system by itself, with `uname -s`.
 
 ## 🩺 Troubleshooting
 
@@ -312,14 +303,13 @@ paths: with symlinks, and with junctions and hard links. To check your own machi
 | `cleon ls` says "no quota seen yet" | Run one chat on that account: `cleon @<name> "say hi"`. |
 | `cleon ls` says "not logged in" | It shows the command to log in again: `cleon add <name>`, or `claude auth login` for the `~/.claude` account. |
 | `cleon` does not switch at a limit | Check that the hook is registered: `grep cleon-swap ~/.claude/settings.json`. If not, run `install.sh` again. |
-| Windows: `cleon: ... is a hard link` | A hard link stops being shared when a program saves the file anew. Turn on Developer Mode, delete that file in the account folder, and start `cleon` again. It makes a real link. |
 | A resumed chat lost a flag | `cleon` keeps `--dangerously-skip-permissions`, `--model`, `--permission-mode`, `--agent`, `--add-dir`, `--settings` and any `--flag=value`. Add others to the `keep` list in `bin/cleon`. |
 
 ## 🧑‍💻 Development
 
 ```bash
 python3 tests/test_cleon.py     # end-to-end tests (macOS and Linux)
-bash tests/smoke.sh             # the parts that differ per system; CI runs it on all three
+bash tests/smoke.sh             # the parts that differ per system (also Windows)
 vhs demo/cleon.tape             # makes demo/cleon.gif again
 ```
 
@@ -327,6 +317,11 @@ The tests run the real `claude` through `cleon` in a terminal, in a throwaway `H
 fake API on your machine. They cover a hard limit, the reserve, the pause and the handoff, the
 wait when every account is out, `cleon reserve`, and `install.sh`. They need `claude`, `jq`, and
 one real login in `~/.claude.json` (only its settings are copied).
+
+`tests/smoke.sh` checks the parts that differ per system: ending `claude`, sharing files (on
+Windows also with junctions and hard links), and reading the quota. CI runs it on Ubuntu, macOS
+and Windows at each push. To check your own machine, run it (in Git Bash on Windows). It needs
+`node`, and it does not need a login.
 
 The demo also runs the real `cleon` and `claude`, against `demo/fake_api.py`. It uses a throwaway
 `HOME` with two example accounts, so no real login or chat shows. It needs
@@ -385,7 +380,7 @@ account itself. Read this before you rely on a switch in the middle of important
 | Limit | Why | What to do |
 |---|---|---|
 | **Moving the accounts folder on macOS logs you out.** | The Keychain entry is tied to the folder path. | After you change `CLEON_HOME`, run `cleon add <name>` again for each account. |
-| **Windows without Developer Mode uses hard links for files.** A hard link stops being shared when a program saves the file anew. | Windows allows symlinks only with Developer Mode or admin rights. | Turn on Developer Mode. See [Troubleshooting](#-troubleshooting). |
+| **Windows without Developer Mode uses hard links for files.** `cleon` says `... is a hard link`. A hard link stops being shared when a program saves the file anew. | Windows allows symlinks only with Developer Mode or admin rights, so `cleon` falls back to junctions for folders and hard links for files. | Turn on Developer Mode, delete that file in the account folder, and start `cleon` again. It makes a real link. |
 | **Use only accounts you may use.** | Each account is a separate Claude plan, under Anthropic's terms. | Do not share one account between people. |
 
 ## 📄 License
