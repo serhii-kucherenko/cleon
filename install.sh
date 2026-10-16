@@ -15,7 +15,12 @@ BIN="$HOME/.local/bin"
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac # Git Bash on Windows
 # Windows jq ends each line with \r\n: drop the \r, so numbers compare.
 [ -n "$windows" ] && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
-winpath() { if [ -n "$windows" ]; then cygpath -m "$1"; else echo "$1"; fi; }
+# The path to write into settings.json: C:/... on Windows, else "$HOME/..." when it is under
+# $HOME, so a settings.json copied to another machine still finds the clone there.
+winpath() {
+	if [ -n "$windows" ]; then cygpath -m "$1"
+	else case "$1" in "$HOME"/*) printf '$HOME%s\n' "${1#"$HOME"}" ;; *) echo "$1" ;; esac; fi
+}
 PY=python3 # Windows often has only "python", and a python3 that opens the Store
 "$PY" -c '' 2>/dev/null || PY=python
 for tool in claude jq "$PY"; do
