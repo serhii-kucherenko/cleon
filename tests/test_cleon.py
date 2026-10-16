@@ -130,6 +130,13 @@ def run_in_terminal(argv, env, cwd, until=None, timeout=120):
 class CleonTest(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp()).resolve()  # claude trusts the real path
+        if os.uname().sysname == "Darwin":
+            # claude saves its login in $HOME's keychain. A HOME with none makes
+            # macOS open a "Keychain Not Found" dialog for each claude start.
+            keychains = self.home / "Library" / "Keychains"
+            keychains.mkdir(parents=True)
+            subprocess.run(["security", "create-keychain", "-p", "", str(keychains / "login.keychain-db")],
+                           env={**os.environ, "HOME": str(self.home)}, check=True, capture_output=True)
         self.cwd = self.home / "project"
         self.cwd.mkdir()
         claude = self.home / ".claude"
