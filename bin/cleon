@@ -222,31 +222,32 @@ list=($(accounts))
 n=${#list[@]}
 index() { local j=0; while [ "$j" -lt "$n" ] && [ "${list[$j]}" != "$1" ]; do j=$((j + 1)); done; echo "$j"; }
 RESET_MARGIN=15 # seconds after a reset before cleon starts, so the server has reset too
-wait_for_room() { # wait_for_room <at least N seconds>: sleep until an account in the order has room; sets i
-	local start now next a t
-	start=$(date +%s)
+out=() # out[j]: until when account j sits out (epoch), after it stopped while its saved quota showed room
+wait_for_room() { # sleep until an account in the order has room; sets i
+	local now next j t
 	while :; do
+		i="$(next_with_room)"
+		[ "$i" -lt "$n" ] && { printf '\n' >&2; echo "cleon: ${list[$i]} has room again." >&2; return; }
 		now=$(date +%s)
-		if [ $((now - start)) -ge "$1" ]; then
-			i="$(next_with_room 0)"
-			[ "$i" -lt "$n" ] && { printf '\n' >&2; echo "cleon: ${list[$i]} has room again." >&2; return; }
-		fi
 		# ponytail: with no known reset (a limit the status line never saw), look again in 30 min.
 		next=$((now + 1800))
-		[ $((start + $1)) -gt "$now" ] && [ $((start + $1)) -lt "$next" ] && next=$((start + $1))
-		for a in "${list[@]}"; do
-			t="$(room_at "$a")"
+		for ((j = 0; j < n; j++)); do
+			t="$(room_at "${list[$j]}")"
+			[ "${out[$j]:-0}" -gt "${t:-0}" ] && t=${out[$j]}
 			[ -n "$t" ] && [ "$t" -gt 0 ] && [ $((t + RESET_MARGIN)) -lt "$next" ] && next=$((t + RESET_MARGIN))
 		done
 		[ "$next" -gt "$now" ] || next=$((now + 1))
-		printf '\rcl: every account is out of room. Waiting until %s (in %s). Ctrl+C stops.\033[K' \
+		printf '\rcleon: every account is out of room. Waiting until %s (in %s). Ctrl+C stops.\033[K' \
 			"$(clock "$next")" "$(span $((next - now)))" >&2
 		sleep $((next - now < 60 ? next - now : 60))
 	done
 }
-next_with_room() { # next_with_room <index>: first account with room from there on, or n
-	local k j
-	for ((k = 0; k < n; k++)); do j=$((($1 + k) % n)); has_room "${list[$j]}" && { echo "$j"; return; }; done
+next_with_room() { # the first account in the order with room, or n: the top ones are used up first
+	local j now
+	now=$(date +%s)
+	for ((j = 0; j < n; j++)); do
+		[ "${out[$j]:-0}" -le "$now" ] && has_room "${list[$j]}" && { echo "$j"; return; }
+	done
 	echo "$n"
 }
 
@@ -257,8 +258,8 @@ case "${1:-}" in
 	shift ;;
 *)
 	# The order is the priority: start on the first account with room.
-	i="$(next_with_room 0)"
-	[ "$i" -lt "$n" ] || wait_for_room 0
+	i="$(next_with_room)"
+	[ "$i" -lt "$n" ] || wait_for_room
 	for ((k = 0; k < i; k++)); do echo "cleon: ${list[$k]} $(no_room "${list[$k]}"). Starting on ${list[$i]}." >&2; done ;;
 esac
 
@@ -272,7 +273,6 @@ for ((k = 0; k < ${#args[@]}; k++)); do
 	--model | --permission-mode | --agent | --add-dir | --settings) keep+=("${args[$k]}" "${args[$((k + 1))]:-}"); k=$((k + 1)) ;;
 	esac
 done
-quick=0 # swaps in a row, each soon after the start
 while :; do
 	name="${list[$i]}"
 	swap="$(mktemp)"
@@ -283,20 +283,18 @@ while :; do
 	rm -f "$swap" "$swap.asked"
 	[ -n "${sid:-}" ] || exit "$rc"
 	stty sane 2>/dev/null
-	# ponytail: "soon" is 2 minutes; a swap that late means the account did work first.
-	[ $((SECONDS - start)) -lt 120 ] && quick=$((quick + 1)) || quick=1
 	case "$why" in
 	reserve) what="is down to its $RESERVE% weekly reserve" ;;
 	paused) what="paused its work at its $RESERVE% weekly reserve" ;;
 	login) what="has a login that no longer works ($(relogin "$name"))" ;;
 	*) what="hit its limit" ;;
 	esac
-	i="$(next_with_room $(((i + 1) % n)))"
-	if [ "$i" -ge "$n" ] || [ "$quick" -ge "$n" ]; then
+	# A stop with room on record means the record is stale: the account sits out 30 min.
+	has_room "$name" && out[$i]=$(($(date +%s) + 1800))
+	i="$(next_with_room)"
+	if [ "$i" -ge "$n" ]; then
 		echo "cleon: $name $what. The chat is saved: cleon --resume $sid" >&2
-		# Limits hit with room on record mean the records are stale: give them 30 min.
-		if [ "$i" -lt "$n" ]; then wait_for_room 1800; else wait_for_room 0; fi
-		quick=0
+		wait_for_room
 	fi
 	off=""
 	[ "$(auto_resume)" = on ] || off=" (auto-resume is off)"
