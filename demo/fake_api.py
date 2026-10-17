@@ -16,6 +16,7 @@ from test_cleon import SSE, Api  # noqa: E402
 
 HOME = Path(sys.argv[1])
 TESTS = "echo '✓ 128 tests passed'"
+EVENTS = ["tests", "handoff", "pickup"]  # written to <home>/events.log as each reply goes out
 REPLIES = [
     None,  # the first chat request runs the tests
     "All 128 tests pass. This account is at its weekly reserve, so here is the handoff.\n\n"
@@ -69,6 +70,8 @@ class Demo(Api):
         time.sleep(1.5)  # a model takes a moment to answer
         events = tool_events() if REPLIES[turn] is None else text_events(REPLIES[turn])
         self.reply(200, "text/event-stream", self.stream(events), self.limits(turn))
+        with open(HOME / "events.log", "a") as log:
+            log.write(f"{time.time()} {EVENTS[turn]}\n")
 
     @staticmethod
     def limits(turn):

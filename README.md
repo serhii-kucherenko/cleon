@@ -13,8 +13,9 @@
 ---
 
 <p align="center">
-  <img src="demo/cleon.gif" alt="cleon demo: the work account reaches its weekly reserve, writes a handoff, and the personal account carries on the same chat" width="760">
+  <img src="demo/cleon.gif" alt="cleon demo: cleon ls lists two example accounts; on the work account the agent reaches its 5% reserve and writes a handoff, and cleon resumes the same chat on the personal account" width="800">
 </p>
+<p align="center"><a href="demo/cleon.mp4">Watch it in full quality (MP4)</a></p>
 
 ## 😤 The problem
 
@@ -153,13 +154,13 @@ cleon --dangerously-skip-permissions    # flags pass through, and stay after a s
 
  ● work        work@example.com   ← cleon starts here
      ✓ logged in   max plan · worked 3m ago
-     5h    ████████░░░░░░░░░░░░  41%   resets in 2h 9m
-     week  ██████████░░░░░░░░░░  50%   resets in 3d 3h
+     5h    ━━━━━━━━────────────  41%   resets in 2h 9m
+     week  ━━━━━━━━━━──────────  50%   resets in 3d 3h
 
  ○ personal    personal@example.com
      ✓ logged in   pro plan · worked 2h 5m ago
-     5h    ██░░░░░░░░░░░░░░░░░░  12%   resets in 2h 9m
-     week  ████░░░░░░░░░░░░░░░░  20%   resets in 3d 3h
+     5h    ━━──────────────────  12%   resets in 2h 9m
+     week  ━━━━────────────────  20%   resets in 3d 3h
 ```
 
 The bar turns yellow 25 points before the limit and red at it.
@@ -317,7 +318,7 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 ```bash
 python3 tests/test_cleon.py     # end-to-end tests (macOS and Linux)
 bash tests/smoke.sh             # the parts that differ per system (also Windows)
-vhs demo/cleon.tape             # makes demo/cleon.gif again
+demo/record.sh                  # makes demo/cleon.mp4 and demo/cleon.gif again
 ```
 
 The tests run the real `claude` through `cleon` in a terminal, in a throwaway `HOME`, against a
@@ -331,8 +332,12 @@ and Windows at each push. To check your own machine, run it (in Git Bash on Wind
 `node`, and it does not need a login.
 
 The demo also runs the real `cleon` and `claude`, against `demo/fake_api.py`. It uses a throwaway
-`HOME` with two example accounts, so no real login or chat shows. It needs
-[vhs](https://github.com/charmbracelet/vhs).
+`HOME` with two example accounts, so no real login or chat shows.
+[VHS](https://github.com/charmbracelet/vhs) records the run, and [Remotion](https://www.remotion.dev)
+(`demo/video`) adds the title, the zooms and the captions, timed from the run's own event log.
+`demo/record.sh` needs `vhs`, `claude`, `jq`, `python3`, `ffmpeg` and `node`. Remotion is free
+for individuals and for companies of up to 3 people. A larger company needs a Remotion company
+license to render the video. Watching it needs none.
 
 ## 🗑️ Uninstall
 

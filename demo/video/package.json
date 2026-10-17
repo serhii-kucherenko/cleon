@@ -1,0 +1,16 @@
+{
+  "name": "cleon-demo-video",
+  "private": true,
+  "description": "Builds demo/cleon.mp4 and demo/cleon.gif from the VHS recording. Run demo/record.sh.",
+  "license": "MIT",
+  "scripts": {
+    "studio": "remotion studio src/index.jsx",
+    "render": "remotion render src/index.jsx Demo ../cleon.mp4 && remotion render src/index.jsx Demo ../cleon.gif --codec=gif --every-nth-frame=2 --scale=0.5"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.534",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "remotion": "4.0.534"
+  }
+}

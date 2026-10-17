@@ -160,7 +160,7 @@ ls)
 		[ "$fill" -gt 20 ] && fill=20
 		[ "$2" -ge $(($4 - 25)) ] && c=$YEL
 		[ "$2" -ge "$4" ] && c=$RED
-		printf '     %-5s %s%s%s%s%s %s%3d%%%s' "$1" "$c" "$(cells █ "$fill")" "$D" "$(cells ░ $((20 - fill)))" "$X" "$c" "$2" "$X"
+		printf '     %-5s %s%s%s%s%s %s%3d%%%s' "$1" "$c" "$(cells ━ "$fill")" "$D" "$(cells ─ $((20 - fill)))" "$X" "$c" "$2" "$X"
 		[ "$3" -gt 0 ] && printf '   %sresets in %s%s' "$D" "$(span $(($3 - now)))" "$X"
 		printf '\n'
 	}

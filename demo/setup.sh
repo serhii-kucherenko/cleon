@@ -27,6 +27,23 @@ echo '{"skipDangerousModePermissionPrompt": true}' >"$DEMO/.claude/settings.json
 cleon name work >/dev/null
 cleon order work personal >/dev/null
 
+# The times demo/video needs for its captions: each cleon command, each claude start, and each
+# reply the fake API sends. demo/record.sh turns them into demo/video/src/timeline.json.
+# The claude wrapper takes itself off PATH before it starts claude: a claude found by path can be
+# a shim (Superset has one) that starts the next claude on PATH, and that would be the wrapper.
+mkdir -p "$DEMO/bin"
+cat >"$DEMO/bin/claude" <<EOF
+#!/usr/bin/env bash
+echo "\$EPOCHREALTIME claude \${1:-}" >>"$DEMO/events.log"
+PATH="\${PATH#"$DEMO/bin:"}" claude "\$@"
+rc=\$?
+echo "\$EPOCHREALTIME exit" >>"$DEMO/events.log"
+exit \$rc
+EOF
+chmod +x "$DEMO/bin/claude"
+export PATH="$DEMO/bin:$PATH"
+trap '[[ $BASH_COMMAND == cleon\ * ]] && echo "$EPOCHREALTIME $BASH_COMMAND" >>"$DEMO/events.log"' DEBUG
+
 python3 "$REPO/demo/fake_api.py" "$DEMO" "$PORT" >/dev/null 2>&1 &
 disown
 cd "$DEMO/billing-app" || return

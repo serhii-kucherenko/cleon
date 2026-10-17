@@ -1,2 +1,5 @@
 __pycache__/
 .DS_Store
+demo/video/node_modules/
+demo/video/public/
+demo/video/src/timeline.json
