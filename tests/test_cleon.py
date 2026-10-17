@@ -58,12 +58,13 @@ class Api(BaseHTTPRequestHandler):
     """mode "limit": refuse every request. mode "ok": answer, and mark main's week 96% used.
     mode "tool": main's week (or the window set) is 96% used at once, and the first chat
     request runs one tool."""
-    mode, home, tool_ran, nudged, delay, window = "limit", Path(), False, False, 0, "seven_day"
+    mode, home, tool_ran, nudged, on_limit, window = "limit", Path(), False, False, None, "seven_day"
 
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
         if self.mode == "limit":
-            time.sleep(self.delay)
+            if Api.on_limit:
+                Api.on_limit()
             body = json.dumps({"type": "error", "error": {"type": "rate_limit_error",
                                                           "message": "test usage limit"}})
             return self.reply(429, "application/json", body,
@@ -155,7 +156,7 @@ class CleonTest(unittest.TestCase):
         (self.home / ".cleon" / "b").mkdir(parents=True)
         config["oauthAccount"] = {"emailAddress": "b@test"}
         (self.home / ".cleon" / "b" / ".claude.json").write_text(json.dumps(config))
-        Api.home, Api.tool_ran, Api.nudged, Api.delay, Api.window = self.home, False, False, 0, "seven_day"
+        Api.home, Api.tool_ran, Api.nudged, Api.on_limit, Api.window = self.home, False, False, None, "seven_day"
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Api)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         # Your own CLEON_HOME would point the run at your real accounts.
@@ -188,16 +189,16 @@ class CleonTest(unittest.TestCase):
         self.assertIn('"permissionMode":"bypassPermissions"', resumed[0])
 
     def test_a_switch_takes_the_first_account_from_the_top(self):
-        # a is first in the order, at its weekly reserve when cleon starts; its week resets 2 s later.
+        # a is first in the order, at its weekly reserve when cleon starts; its week resets as main fails.
         b = json.loads((self.home / ".cleon" / "b" / ".claude.json").read_text())
         for name in ("a", "c"):
             (self.home / ".cleon" / name).mkdir()
             (self.home / ".cleon" / name / ".claude.json").write_text(
                 json.dumps(dict(b, oauthAccount={"emailAddress": f"{name}@test"})))
-        quota(self.home / ".cleon" / "a" / "quota.json", 99, resets_in=2)
+        quota(self.home / ".cleon" / "a" / "quota.json", 99)
         subprocess.run([str(CLEON), "order", "a", "main", "c"], env=self.env, check=True,
                        capture_output=True)
-        Api.mode, Api.delay = "limit", 3  # main fails after a has reset
+        Api.mode, Api.on_limit = "limit", lambda: quota(self.home / ".cleon" / "a" / "quota.json", 10)
         moved = "main hit its limit. Continuing on"
         _, out = run_in_terminal([str(CLEON), "say hi"], self.env, self.cwd, until=moved)
         self.assertIn("cleon: a is down to its 5% weekly reserve. Starting on main.", out)
