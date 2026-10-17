@@ -49,15 +49,16 @@ TOOL_SSE = [SSE[0],
             ("message_stop", {"type": "message_stop"})]
 
 
-def quota(path, used, age=0, resets_in=86400):
-    path.write_text(json.dumps({"updated_at": time.time() - age, "seven_day": {
+def quota(path, used, age=0, resets_in=86400, window="seven_day"):
+    path.write_text(json.dumps({"updated_at": time.time() - age, window: {
         "used_percentage": used, "resets_at": int(time.time()) + resets_in}}))
 
 
 class Api(BaseHTTPRequestHandler):
     """mode "limit": refuse every request. mode "ok": answer, and mark main's week 96% used.
-    mode "tool": main's week is 96% used at once, and the first chat request runs one tool."""
-    mode, home, tool_ran, nudged, delay = "limit", Path(), False, False, 0
+    mode "tool": main's week (or the window set) is 96% used at once, and the first chat
+    request runs one tool."""
+    mode, home, tool_ran, nudged, delay, window = "limit", Path(), False, False, 0, "seven_day"
 
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers.get("content-length", 0))) or b"{}")
@@ -70,7 +71,7 @@ class Api(BaseHTTPRequestHandler):
                                "x-should-retry": "false"})
         events = SSE
         if self.mode == "tool":
-            quota(self.home / ".claude" / "quota.json", 96)
+            quota(self.home / ".claude" / "quota.json", 96, window=self.window)
             Api.nudged = Api.nudged or "safe stopping point" in json.dumps(req)
             if req.get("stream") and req.get("tools") and not Api.tool_ran:
                 Api.tool_ran, events = True, TOOL_SSE
@@ -154,7 +155,7 @@ class CleonTest(unittest.TestCase):
         (self.home / ".cleon" / "b").mkdir(parents=True)
         config["oauthAccount"] = {"emailAddress": "b@test"}
         (self.home / ".cleon" / "b" / ".claude.json").write_text(json.dumps(config))
-        Api.home, Api.tool_ran, Api.nudged, Api.delay = self.home, False, False, 0
+        Api.home, Api.tool_ran, Api.nudged, Api.delay, Api.window = self.home, False, False, 0, "seven_day"
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Api)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         # Your own CLEON_HOME would point the run at your real accounts.
@@ -219,6 +220,14 @@ class CleonTest(unittest.TestCase):
         self.assertIn(moved, out)
         self.assertIn("Resume the paused work", self.chat())
 
+    def test_the_5_hour_reserve_pauses_the_work_too(self):
+        Api.mode, Api.window = "tool", "five_hour"
+        quota(self.home / ".claude" / "quota.json", 50, age=60, window="five_hour")
+        moved = "main paused its work at its 5% 5-hour reserve. Continuing on b."
+        _, out = run_in_terminal([str(CLEON), "do the task"], self.env, self.cwd, until="Resume the paused work")
+        self.assertTrue(Api.nudged, "the agent was asked to pause at a safe point")
+        self.assertIn(moved, out)
+
     def test_install_keeps_your_status_line_and_runs_twice(self):
         subprocess.run([str(REPO / "install.sh")], env=self.env, check=True, capture_output=True)
         settings = json.loads((self.home / ".claude" / "settings.json").read_text())
@@ -243,6 +252,10 @@ class CleonTest(unittest.TestCase):
         quota(self.home / ".claude" / "quota.json", 50)
         _, out = run_in_terminal([str(CLEON), "--version"], self.env, self.cwd)
         self.assertIn("cleon: main is down to its 60% weekly reserve. Starting on b.", out)
+        subprocess.run([str(CLEON), "reserve", "5h", "30"], env=self.env, check=True, capture_output=True)
+        quota(self.home / ".claude" / "quota.json", 75, window="five_hour")
+        _, out = run_in_terminal([str(CLEON), "--version"], self.env, self.cwd)
+        self.assertIn("cleon: main is down to its 30% 5-hour reserve. Starting on b.", out)
 
     def test_an_upper_case_name_is_refused(self):
         run = subprocess.run([str(CLEON), "add", "WORK"], env=self.env, capture_output=True,
@@ -273,7 +286,7 @@ class CleonTest(unittest.TestCase):
         (self.home / ".claude" / "quota.json").write_text(json.dumps({"five_hour": {
             "used_percentage": 100, "resets_at": int(time.time()) + 3600}}))
         _, out = run_in_terminal([str(CLEON), "--version"], self.env, self.cwd)
-        self.assertIn("cleon: main used its 5-hour quota. Starting on b.", out)
+        self.assertIn("cleon: main is down to its 5% 5-hour reserve. Starting on b.", out)
 
         # Every account is at its reserve: cleon waits for the first reset, then starts there.
         quota(self.home / ".claude" / "quota.json", 96, resets_in=2)
