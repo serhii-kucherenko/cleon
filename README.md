@@ -49,9 +49,9 @@ spent, the next one takes the throne, and the empire carries on.
 ## 🎯 What you get
 
 - **🔄 One chat, many accounts.** The chat moves to the next account with its full history.
-- **🛑 A safe stop.** At 95% of the weekly quota (you can change it), the agent finishes its step and writes a handoff. It does not break off in the middle of a change.
+- **🛑 A safe stop.** At 95% of the 5-hour or the weekly quota (you can change both), the agent finishes its step and writes a handoff. It does not break off in the middle of a change.
 - **⚡ A hard limit is not the end.** On a usage limit or a dead login, `cleon` moves the chat at once and says "Continue where you stopped".
-- **🧭 Smart start.** `cleon` starts on the first account in your order that has quota left.
+- **🧭 Top first.** `cleon` starts on the first account in your order that has quota left. Each switch also looks from the top, so the first accounts are used up first.
 - **📊 One view of all quota.** `cleon ls` shows each account's 5-hour and weekly use, with reset times.
 - **⏳ Waits for you.** When every account is out, `cleon` waits for the first reset and carries on there.
 - **🧩 One setup.** All accounts share your settings, hooks, skills, plugins and chat history. Each keeps its own login.
@@ -119,7 +119,7 @@ cleon add spare
 `cleon` refuses an account whose login is already in the list. Names use lowercase letters, digits
 and `-`.
 
-**5. Set the order.** `cleon` uses the first account with quota left.
+**5. Set the order.** The order is the priority. `cleon` uses the first account with quota left, and goes back to it when its quota resets.
 
 ```bash
 cleon order work personal spare
@@ -149,7 +149,7 @@ cleon --dangerously-skip-permissions    # flags pass through, and stay after a s
 ### `cleon ls`
 
 ```text
- cleon accounts   order = priority · cleon starts on the first with room · auto-resume on · reserve 5%
+ cleon accounts   order = priority · cleon starts on the first with room · auto-resume on · reserve 5h 5% week 5%
 
  ● work        work@example.com   ← cleon starts here
      ✓ logged in   max plan · worked 3m ago
@@ -176,7 +176,7 @@ $ cleon "finish the billing refactor"
 cleon: work paused its work at its 5% weekly reserve. Continuing on personal.
 
   ...the same chat opens on "personal"...
-  > Resume the paused work: the last account reached its weekly reserve. Carry on from your handoff.
+  > Resume the paused work: the last account reached its quota reserve. Carry on from your handoff.
   ● Picking up from the handoff. The refactor is done, so I update docs/billing.md next.
 ```
 
@@ -214,34 +214,39 @@ folder, set `CLEON_HOME`, for example `export CLEON_HOME=~/my-accounts` in your 
 | `cleon order <name...>` | Set the order `cleon` uses the accounts in. |
 | `cleon name <name>` | Name the `~/.claude` account (default `main`). |
 | `cleon resume [on\|off]` | After a switch, the next account carries on by itself (`on`, the default), or opens the chat and waits for you (`off`). |
-| `cleon reserve [percent]` | Show or set the weekly quota each account keeps back (default 5). |
+| `cleon reserve [5h\|week] [percent]` | Show or set the quota each account keeps back, of its 5-hour and its weekly quota (default 5% of each). Without `5h` or `week`, it sets both. |
 | `cleon help` | Show the commands. |
 
 ## ⏱️ What happens at a limit
 
 | Event | What `cleon` does | You see |
 |---|---|---|
-| Weekly use reaches the reserve during a turn | The agent gets a note to finish its step and write a handoff. At the end of the turn, the next account resumes the chat with "Resume the paused work". | `cleon: work paused its work at its 5% weekly reserve. Continuing on personal.` |
-| Weekly use reaches the reserve at the end of a turn | The next account opens the chat and waits for your next prompt. | `cleon: work is down to its 5% weekly reserve. Continuing on personal.` |
+| 5-hour or weekly use reaches its reserve during a turn | The agent gets a note to finish its step and write a handoff. At the end of the turn, the next account resumes the chat with "Resume the paused work". | `cleon: work paused its work at its 5% weekly reserve. Continuing on personal.` |
+| 5-hour or weekly use reaches its reserve at the end of a turn | The next account opens the chat and waits for your next prompt. | `cleon: work is down to its 5% weekly reserve. Continuing on personal.` |
 | A hard usage limit (5-hour or weekly) | The next account resumes the chat with "Continue where you stopped". | `cleon: work hit its limit. Continuing on personal.` |
 | The login stopped working | The same as a limit. | `cleon: personal has a login that no longer works (cleon add personal). ...` |
 | Every account is out | `cleon` waits in the terminal until the first reset. Ctrl+C stops the wait. | `cleon: every account is out of room. Waiting until 14:05 (in 1h 12m).` |
 
 ### Change the reserve
 
-The 5% weekly reserve keeps each account usable for small jobs.
+Each account keeps 5% of its 5-hour quota and 5% of its weekly quota. The weekly reserve keeps
+the account usable for small jobs. Both give the agent time to stop at a safe point.
 
 ```bash
-cleon reserve 15
+cleon reserve 15        # both
+cleon reserve 5h 10     # only the 5-hour reserve
+cleon reserve week 20   # only the weekly reserve
 ```
 
 ```text
-weekly reserve: 15% (cleon skips an account at 85% weekly use)
+5-hour reserve: 10% (cleon skips an account at 90% 5-hour use)
+weekly reserve: 20% (cleon skips an account at 80% weekly use)
 ```
 
-The value is saved in `~/.cleon/.reserve`. A `cleon` that runs now keeps its old value.
-The next `cleon` you start uses the new one. `cleon reserve 0` turns the reserve off, so `cleon`
-switches only at a hard limit.
+The values are saved in `~/.cleon/.reserve-5h` and `~/.cleon/.reserve`. A `cleon` that runs now
+keeps its old values. The next `cleon` you start uses the new ones. A reserve of 0 turns it off, so
+`cleon` switches only at a hard limit. To stop the next account from carrying on by itself after a
+switch, run `cleon resume off`.
 
 ## 🤔 Why not just...
 

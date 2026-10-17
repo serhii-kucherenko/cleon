@@ -1,27 +1,32 @@
 #!/bin/bash
 # PostToolUse, Stop and StopFailure hook for sessions that `cleon` started (CLEON_SWAP_FILE set); any
-# other session: does nothing. Near the weekly reserve it asks the agent to pause; then it ends
+# other session: does nothing. Near a quota reserve it asks the agent to pause; then it ends
 # claude and tells cleon why, so cleon resumes the chat on the next account:
-#   PostToolUse, week at CLEON_MAX_WEEKLY% -> tells the agent to reach a safe point and end its turn
-#   Stop, week at CLEON_MAX_WEEKLY%        -> "paused" (after that message) or "reserve"
-#   StopFailure with a usage limit      -> "limit"
-#   StopFailure with a dead login       -> "login"
+#   PostToolUse, at a reserve  -> tells the agent to reach a safe point and end its turn
+#   Stop, at a reserve         -> "paused" (after that message) or "reserve", and the window
+#   StopFailure, usage limit   -> "limit"
+#   StopFailure, dead login    -> "login"
+# A reserve: 5-hour use at CLEON_MAX_5H%, or weekly use at CLEON_MAX_WEEKLY%.
 [ -n "${CLEON_SWAP_FILE:-}" ] || exit 0
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac # Git Bash on Windows
 # Windows jq ends each line with \r\n: drop the \r, so numbers compare.
 [ -n "$windows" ] && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
 input="$(cat)"
 config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-max="${CLEON_MAX_WEEKLY:-95}"
 asked="$CLEON_SWAP_FILE.asked" # the pause levels already sent to this claude
 
-weekly() { # this login's weekly percent used, 0 when unknown
+used() { # used <five_hour|seven_day>: this login's percent used in that window, 0 when unknown
 	local login="$HOME/.claude.json" acct
 	[ -n "${CLAUDE_CONFIG_DIR:-}" ] && login="$CLAUDE_CONFIG_DIR/.claude.json"
 	acct="$(jq -r '.oauthAccount.emailAddress // ""' "$login" 2>/dev/null)"
-	jq -r --argjson now "$(date +%s)" --arg acct "$acct" \
-		'if (.account // $acct) == $acct and ((.seven_day.resets_at // 0) > $now)
-		 then .seven_day.used_percentage // 0 | floor else 0 end' "$config/quota.json" 2>/dev/null || echo 0
+	jq -r --argjson now "$(date +%s)" --arg acct "$acct" --arg w "$1" \
+		'if (.account // $acct) == $acct and ((.[$w].resets_at // 0) > $now)
+		 then .[$w].used_percentage // 0 | floor else 0 end' "$config/quota.json" 2>/dev/null || echo 0
+}
+at_reserve() { # the window at its reserve and its use, as "five_hour 96"; nothing when none is
+	local u
+	u="$(used seven_day)" && [ "$u" -ge "${CLEON_MAX_WEEKLY:-95}" ] && { echo "seven_day $u"; return; }
+	u="$(used five_hour)" && [ "$u" -ge "${CLEON_MAX_5H:-95}" ] && echo "five_hour $u"
 }
 
 end_claude() { # end_claude <why>: hand cleon the session id and the reason, then end claude
@@ -53,10 +58,12 @@ end_windows_claude() { # Git Bash's ps cannot see claude.exe, a Windows process,
 
 case "$(printf '%s' "$input" | jq -r '.hook_event_name + ":" + (.error // "")')" in
 PostToolUse:*)
-	used="$(weekly)"
-	[ "$used" -ge "$max" ] || exit 0
-	level=$max text="This account is at $used% of its weekly quota, its reserve. Reach a safe stopping point: finish the step you are in, start no new long or risky command, then write a short handoff (what is done, what is next, anything half done) and end your turn. The next account resumes from your handoff."
-	[ "$used" -ge 98 ] && level=98 text="This account is at $used% of its weekly quota. Stop now: start no new step, write the handoff (what is done, what is next, anything half done) and end your turn."
+	read -r win used <<<"$(at_reserve)"
+	[ -n "$win" ] || exit 0
+	quota=weekly
+	[ "$win" = five_hour ] && quota=5-hour
+	level="$win reserve" text="This account is at $used% of its $quota quota, its reserve. Reach a safe stopping point: finish the step you are in, start no new long or risky command, then write a short handoff (what is done, what is next, anything half done) and end your turn. The next account resumes from your handoff."
+	[ "$used" -ge 98 ] && level="$win 98" text="This account is at $used% of its $quota quota. Stop now: start no new step, write the handoff (what is done, what is next, anything half done) and end your turn."
 	grep -qx "$level" "$asked" 2>/dev/null && exit 0
 	echo "$level" >>"$asked"
 	jq -n --arg text "$text" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $text}}' ;;
@@ -67,8 +74,9 @@ Stop:*)
 		jq -e --argjson now "$(date +%s)" '(.updated_at // 0) > $now - 10' "$config/quota.json" >/dev/null 2>&1 && break
 		sleep 0.25
 	done
-	[ "$(weekly)" -ge "$max" ] || exit 0
-	if [ -s "$asked" ]; then end_claude paused; else end_claude reserve; fi ;;
+	read -r win _ <<<"$(at_reserve)"
+	[ -n "$win" ] || exit 0
+	if [ -s "$asked" ]; then end_claude "paused $win"; else end_claude "reserve $win"; fi ;;
 StopFailure:rate_limit | StopFailure:billing_error | StopFailure:account_on_hold) end_claude limit ;;
 StopFailure:authentication_failed | StopFailure:oauth_org_not_allowed) end_claude login ;;
 esac

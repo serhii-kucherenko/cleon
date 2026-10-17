@@ -8,7 +8,8 @@ lsof -ti "tcp:$PORT" | xargs kill 2>/dev/null # an API left from an earlier run
 rm -rf "$DEMO" && mkdir -p "$DEMO/.claude" "$DEMO/.cleon/personal" "$DEMO/billing-app"
 DEMO="$(cd "$DEMO" && pwd -P)" # claude trusts the real path
 
-for env in $(env | grep -o '^CLAUDE[A-Z_]*'); do unset "$env"; done
+# Your own CLEON_HOME would point the demo at your real accounts.
+for env in $(env | grep -oE '^(CLAUDE|CLEON|ANTHROPIC)[A-Z0-9_]*'); do unset "$env"; done
 export HOME="$DEMO" PATH="$DEMO/.local/bin:$PATH" TERM=xterm-256color
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT" ANTHROPIC_AUTH_TOKEN=demo
 export CLAUDE_CODE_MAX_RETRIES=0 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1

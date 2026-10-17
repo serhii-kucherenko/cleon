@@ -7,7 +7,7 @@
 #   cleon order <name...>            set the order cleon moves through the accounts in
 #   cleon name <name>                name the ~/.claude account (default: main)
 #   cleon resume [on|off]            after a switch, the next account carries on by itself (default on)
-#   cleon reserve [percent]          the weekly quota each account keeps back (default 5)
+#   cleon reserve [5h|week] [pct]    the quota each account keeps back (default 5% of each)
 #   cleon help                       show this help
 #
 # The account named in ~/.cleon/.main (default "main") is ~/.claude. Every other account is a CLAUDE_CONFIG_DIR under
@@ -15,24 +15,28 @@
 # (history, settings, hooks, skills) to ~/.claude. So any account can --resume any chat. To share
 # more, list the extra names in ~/.cleon/.shared, one per line.
 #
-# Each account keeps RESERVE percent of its weekly quota (cleon reserve sets it). cleon skips an account that is down to
-# its reserve or has used its 5-hour quota. When the account gets there mid-turn,
+# Each account keeps a reserve of its 5-hour and of its weekly quota (cleon reserve sets them). cleon skips an
+# account that is down to either reserve. When the account gets there mid-turn,
 # hooks/cleon-swap.sh (install.sh registers it) asks the agent to pause at a safe point with a handoff, and ends claude
 # when the turn ends; it also ends claude on a usage limit or a dead login. cleon then resumes the
 # same chat on the next account, and with auto-resume on, tells it to carry on.
-# The weekly figure is the last one the status line saved in <config dir>/quota.json; a figure
+# The figures are the last ones the status line saved in <config dir>/quota.json; a figure
 # saved for another account (after a /login to it) counts as unknown.
 set -u
 export CLEON_HOME="${CLEON_HOME:-$HOME/.cleon}" # the hooks read it too
 A="$CLEON_HOME"
-RESERVE="$(cat "$A/.reserve" 2>/dev/null)"
-[[ "$RESERVE" =~ ^(0|[1-9][0-9]?)$ ]] || RESERVE=5 # 0 to 99, no leading zero (bash reads 08 as octal)
+saved_reserve() { # saved_reserve <file>: 0 to 99, no leading zero (bash reads 08 as octal); else 5
+	local p
+	p="$(cat "$1" 2>/dev/null)"
+	[[ "$p" =~ ^(0|[1-9][0-9]?)$ ]] && echo "$p" || echo 5
+}
+RESERVE="$(saved_reserve "$A/.reserve")" RESERVE_5H="$(saved_reserve "$A/.reserve-5h")"
 MAIN="$(cat "$A/.main" 2>/dev/null || echo main)"
 # Never a login, a quota or a cache: each account keeps its own.
 SHARED="settings.json settings.local.json CLAUDE.md hooks commands agents skills plugins
 output-styles mods projects history.jsonl todos file-history plans tasks transcripts paste-cache
 $(cat "$A/.shared" 2>/dev/null)"
-export CLEON_MAX_WEEKLY=$((100 - RESERVE))
+export CLEON_MAX_WEEKLY=$((100 - RESERVE)) CLEON_MAX_5H=$((100 - RESERVE_5H))
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; *) windows= ;; esac # Git Bash on Windows
 # Windows jq ends each line with \r\n: drop the \r, so numbers compare.
 [ -n "$windows" ] && jq() { command jq "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
@@ -60,11 +64,12 @@ seen() { # seen <name>: when the status line last saved this login's quota (epoc
 	jq -r --arg acct "$(email "$1")" 'select((.account // $acct) == $acct) | .updated_at // empty | floor' \
 		"$(dir "$1")/quota.json" 2>/dev/null
 }
+reserve_of() { if [ "$1" = five_hour ]; then echo "$RESERVE_5H% 5-hour"; else echo "$RESERVE% weekly"; fi; }
 relogin() { [ "$1" = "$MAIN" ] && echo "claude auth login" || echo "cleon add $1"; } # how to log in again
 no_room() { # no_room <name>: why the account cannot take work now; prints nothing if it can
 	if [ "$(email "$1")" = "not logged in" ]; then echo "is not logged in ($(relogin "$1"))"
-	elif [ "$(used "$1" seven_day)" -ge "$CLEON_MAX_WEEKLY" ]; then echo "is down to its $RESERVE% weekly reserve"
-	elif [ "$(used "$1" five_hour)" -ge 100 ]; then echo "used its 5-hour quota"; fi
+	elif [ "$(used "$1" seven_day)" -ge "$CLEON_MAX_WEEKLY" ]; then echo "is down to its $(reserve_of seven_day) reserve"
+	elif [ "$(used "$1" five_hour)" -ge "$CLEON_MAX_5H" ]; then echo "is down to its $(reserve_of five_hour) reserve"; fi
 }
 span() { # span <seconds>: 2d 3h, 1h 12m or 5m
 	local t=$1
@@ -78,7 +83,7 @@ room_at() { # room_at <name>: when the account has room again (epoch); 0 if it h
 	read -r week wreset <<<"$(window "$1" seven_day)"
 	read -r five freset <<<"$(window "$1" five_hour)"
 	[ "$week" -ge "$CLEON_MAX_WEEKLY" ] && [ "$wreset" -gt "$t" ] && t=$wreset
-	[ "$five" -ge 100 ] && [ "$freset" -gt "$t" ] && t=$freset
+	[ "$five" -ge "$CLEON_MAX_5H" ] && [ "$freset" -gt "$t" ] && t=$freset
 	echo "$t"
 }
 clock() { date -r "$1" +%H:%M 2>/dev/null || date -d "@$1" +%H:%M; } # BSD, then GNU date
@@ -158,8 +163,8 @@ ls)
 	}
 	first=""
 	for n in $(accounts); do has_room "$n" && { first=$n; break; }; done
-	printf '\n %scleon accounts%s   %sorder = priority · cleon starts on the first with room · auto-resume %s · reserve %s%%%s\n\n' \
-		"$B" "$X" "$D" "$(auto_resume)" "$RESERVE" "$X"
+	printf '\n %scleon accounts%s   %sorder = priority · cleon starts on the first with room · auto-resume %s · reserve 5h %s%% week %s%%%s\n\n' \
+		"$B" "$X" "$D" "$(auto_resume)" "$RESERVE_5H" "$RESERVE" "$X"
 	for n in $(accounts); do
 		[ "$n" = "$first" ] && mark="${GRN}●${X}" || mark="${D}○${X}"
 		printf ' %s %s%-11s%s %s' "$mark" "$B" "$n" "$X" "$(email "$n" | grep -v '^not logged in$')"
@@ -181,7 +186,7 @@ ls)
 			continue
 		fi
 		read -r pct reset <<<"$(window "$n" five_hour)"
-		meter 5h "$pct" "$reset" 100
+		meter 5h "$pct" "$reset" "$CLEON_MAX_5H"
 		read -r pct reset <<<"$(window "$n" seven_day)"
 		meter week "$pct" "$reset" "$CLEON_MAX_WEEKLY"
 		why="$(no_room "$n")"
@@ -196,12 +201,18 @@ name)
 	mkdir -p "$A" && echo "$2" >"$A/.main"
 	exec "$0" ls ;;
 reserve)
-	if [ -n "${2:-}" ]; then
-		[[ "$2" =~ ^(0|[1-9][0-9]?)$ ]] || { echo "usage: cleon reserve [0-99]" >&2; exit 2; }
-		mkdir -p "$A" && echo "$2" >"$A/.reserve"
-		RESERVE=$2
+	case "${2:-}" in
+	5h) files=.reserve-5h p="${3:-}" ;;
+	week) files=.reserve p="${3:-}" ;;
+	*) files=".reserve-5h .reserve" p="${2:-}" ;;
+	esac
+	if [ -n "$p" ]; then
+		[[ "$p" =~ ^(0|[1-9][0-9]?)$ ]] || { echo "usage: cleon reserve [5h|week] [0-99]" >&2; exit 2; }
+		mkdir -p "$A" && for f in $files; do echo "$p" >"$A/$f"; done
+		exec "$0" reserve
 	fi
-	echo "weekly reserve: $RESERVE% (cleon skips an account at $((100 - RESERVE))% weekly use)"
+	echo "5-hour reserve: $RESERVE_5H% (cleon skips an account at $CLEON_MAX_5H% 5-hour use)"
+	echo "weekly reserve: $RESERVE% (cleon skips an account at $CLEON_MAX_WEEKLY% weekly use)"
 	exit ;;
 resume)
 	case "${2:-}" in
@@ -276,16 +287,15 @@ done
 while :; do
 	name="${list[$i]}"
 	swap="$(mktemp)"
-	start=$SECONDS
 	CLEON_SWAP_FILE="$(winpath "$swap")" on "$name" claude ${args[@]+"${args[@]}"}
 	rc=$?
-	read -r sid why <"$swap"
+	read -r sid why win <"$swap"
 	rm -f "$swap" "$swap.asked"
 	[ -n "${sid:-}" ] || exit "$rc"
 	stty sane 2>/dev/null
 	case "$why" in
-	reserve) what="is down to its $RESERVE% weekly reserve" ;;
-	paused) what="paused its work at its $RESERVE% weekly reserve" ;;
+	reserve) what="is down to its $(reserve_of "$win") reserve" ;;
+	paused) what="paused its work at its $(reserve_of "$win") reserve" ;;
 	login) what="has a login that no longer works ($(relogin "$name"))" ;;
 	*) what="hit its limit" ;;
 	esac
@@ -305,7 +315,7 @@ while :; do
 	# A turn that ended at the reserve was done; the others broke off or paused, so say go on.
 	if [ -z "$off" ]; then
 		case "$why" in
-		paused) args+=("Resume the paused work: the last account reached its weekly reserve. Carry on from your handoff. If nothing is left, say so in one line.") ;;
+		paused) args+=("Resume the paused work: the last account reached its quota reserve. Carry on from your handoff. If nothing is left, say so in one line.") ;;
 		limit | login) args+=("Continue where you stopped.") ;;
 		esac
 	fi
