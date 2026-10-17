@@ -5,6 +5,8 @@
 #   2. share  a file in ~/.claude shows in another account
 #   3. quota  cleon ls reads an account's quota (Windows jq writes \r\n)
 #   4. on Windows, share again without symlinks: a junction for a folder, a hard link for a file
+#   5. one    with one account only, cleon says so: a wrong CLEON_HOME looks just like that
+#   6. link   a linked accounts folder: claude gets the real path, since macOS ties each login to it
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"
@@ -33,7 +35,11 @@ unset CLEON_SWAP_FILE
 # 2. share and 3. quota, on a fake claude that answers only what cleon ls asks
 export HOME="$T/home" CLEON_HOME="$T/home/.cleon" PATH="$T/fake:$PATH"
 mkdir -p "$HOME/.claude/skills" "$CLEON_HOME/b" "$T/fake"
-printf '#!/bin/bash\necho "{\\"loggedIn\\": true}"\n' >"$T/fake/claude"
+cat >"$T/fake/claude" <<EOF
+#!/bin/bash
+echo "\${CLAUDE_CONFIG_DIR:-}" >>"$T/dirs"
+echo '{"loggedIn": true}'
+EOF
 chmod +x "$T/fake/claude"
 echo '{"oauthAccount": {"emailAddress": "a@example.com"}}' >"$HOME/.claude.json"
 echo '{"oauthAccount": {"emailAddress": "b@example.com"}}' >"$CLEON_HOME/b/.claude.json"
@@ -57,5 +63,15 @@ if [ -n "$exe" ]; then
 	check "share without symlinks: a file (hard link)" 'grep -q again "$CLEON_HOME/c/settings.json" 2>/dev/null'
 	check "share without symlinks: says to turn on Developer Mode" 'grep -q "Developer Mode" <<<"$fallback"'
 	out="$out$fallback"
+fi
+
+one="$(CLEON_HOME="$T/none" "$REPO/bin/cleon" 2>&1)"
+check "one account: cleon says so" 'grep -q "only one account" <<<"$one"'
+out="$out$one"
+
+if [ -z "$exe" ]; then # Git Bash makes a copy for ln -s without Developer Mode
+	mv "$CLEON_HOME" "$T/accounts" && ln -s "$T/accounts" "$CLEON_HOME"
+	"$REPO/bin/cleon" @b >/dev/null 2>&1
+	check "link: claude gets the real folder" '[ "$(tail -1 "$T/dirs")" = "$(cd "$T/accounts" && pwd -P)/b" ]'
 fi
 [ "$fails" -eq 0 ] || { printf '\n%s\n' "$out"; exit 1; }
