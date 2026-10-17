@@ -23,7 +23,10 @@
 # The figures are the last ones the status line saved in <config dir>/quota.json; a figure
 # saved for another account (after a /login to it) counts as unknown.
 set -u
-export CLEON_HOME="${CLEON_HOME:-$HOME/.cleon}" # the hooks read it too
+CLEON_HOME="${CLEON_HOME:-$HOME/.cleon}"
+# The real path: macOS ties each login to its folder path, so a link to the folder works the same.
+CLEON_HOME="$(cd "$CLEON_HOME" 2>/dev/null && pwd -P || echo "$CLEON_HOME")"
+export CLEON_HOME # the hooks read it too
 A="$CLEON_HOME"
 saved_reserve() { # saved_reserve <file>: 0 to 99, no leading zero (bash reads 08 as octal); else 5
 	local p
@@ -231,6 +234,8 @@ esac
 
 list=($(accounts))
 n=${#list[@]}
+# A shell without your CLEON_HOME looks just like this, so say it.
+[ "$n" -gt 1 ] || { echo "cleon: only one account ($MAIN) in $A. Add another: cleon add <name>" >&2; [ -t 2 ] && sleep 2; }
 index() { local j=0; while [ "$j" -lt "$n" ] && [ "${list[$j]}" != "$1" ]; do j=$((j + 1)); done; echo "$j"; }
 RESET_MARGIN=15 # seconds after a reset before cleon starts, so the server has reset too
 out=() # out[j]: until when account j sits out (epoch), after it stopped while its saved quota showed room

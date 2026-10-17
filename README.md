@@ -202,7 +202,9 @@ flowchart LR
 Your normal `~/.claude` login is the first account. Each other account is a folder
 `~/.cleon/<name>`, used as `CLAUDE_CONFIG_DIR`. It has its own login and its own
 `.claude.json`. The shared parts are symlinks to `~/.claude`. To keep the accounts in another
-folder, set `CLEON_HOME`, for example `export CLEON_HOME=~/my-accounts` in your `~/.zshrc`.
+folder, make `~/.cleon` a link to it: `ln -s ~/my-accounts ~/.cleon`. `cleon` follows the link to
+the real folder, and a link works in every shell. `CLEON_HOME=~/my-accounts` works too, but only in
+shells started after you set it. When `cleon` finds only one account, it says so.
 
 ## 🛠️ Commands
 
