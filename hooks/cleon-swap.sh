@@ -4,7 +4,7 @@
 # claude and tells cleon why, so cleon resumes the chat on the next account:
 #   PostToolUse, at a reserve  -> tells the agent to reach a safe point and end its turn
 #   Stop, at a reserve         -> "paused" (after that message) or "reserve", and the window
-#   StopFailure, usage limit   -> "limit"
+#   StopFailure, usage limit   -> "limit", or "model <Model> <when it resets>" for a limit on one model
 #   StopFailure, dead login    -> "login"
 # A reserve: 5-hour use at CLEON_MAX_5H%, or weekly use at CLEON_MAX_WEEKLY%.
 [ -n "${CLEON_SWAP_FILE:-}" ] || exit 0
@@ -77,7 +77,12 @@ Stop:*)
 	read -r win _ <<<"$(at_reserve)"
 	[ -n "$win" ] || exit 0
 	if [ -s "$asked" ]; then end_claude "paused $win"; else end_claude "reserve $win"; fi ;;
-StopFailure:rate_limit | StopFailure:billing_error | StopFailure:account_on_hold) end_claude limit ;;
+StopFailure:rate_limit)
+	# claude names a limit on one model with a capital ("Fable limit"); the others are lower case.
+	model="$(printf '%s' "$input" | jq -r '.last_assistant_message // "" |
+		capture("hit your (?<m>[A-Z][A-Za-z]*) limit( · (?<r>resets .*))?") | "\(.m) \(.r // "")"' 2>/dev/null)"
+	if [ -n "$model" ]; then end_claude "model $model"; else end_claude limit; fi ;;
+StopFailure:billing_error | StopFailure:account_on_hold) end_claude limit ;;
 StopFailure:authentication_failed | StopFailure:oauth_org_not_allowed) end_claude login ;;
 esac
 exit 0

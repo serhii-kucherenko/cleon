@@ -227,6 +227,7 @@ shells started after you set it. When `cleon` finds only one account, it says so
 | 5-hour or weekly use reaches its reserve during a turn | The agent gets a note to finish its step and write a handoff. At the end of the turn, the next account resumes the chat with "Resume the paused work". | `cleon: work paused its work at its 5% weekly reserve. Continuing on personal.` |
 | 5-hour or weekly use reaches its reserve at the end of a turn | The next account opens the chat and waits for your next prompt. | `cleon: work is down to its 5% weekly reserve. Continuing on personal.` |
 | A hard usage limit (5-hour or weekly) | The next account resumes the chat with "Continue where you stopped". | `cleon: work hit its limit. Continuing on personal.` |
+| A limit on one model (such as "Fable limit") | The next account resumes the chat, as at a hard limit. When every account has hit that limit, the chat goes on at once with `--model opus`. It does not wait. | `cleon: every account hit its Fable limit. It resets Nov 29 at 9pm (America/Vancouver). Switching the chat from Fable to opus.` |
 | The login stopped working | The same as a limit. | `cleon: personal has a login that no longer works (cleon add personal). ...` |
 | Every account is out | `cleon` waits in the terminal until the first reset. Ctrl+C stops the wait. | `cleon: every account is out of room. Waiting until 14:05 (in 1h 12m).` |
 
@@ -318,6 +319,7 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 ```bash
 python3 tests/test_cleon.py     # end-to-end tests (macOS and Linux)
 bash tests/smoke.sh             # the parts that differ per system (also Windows)
+bash scripts/check.sh           # what CI runs: every script parses, then the smoke test
 demo/record.sh                  # makes demo/cleon.mp4 and demo/cleon.gif again
 ```
 
@@ -327,7 +329,7 @@ wait when every account is out, `cleon reserve`, and `install.sh`. They need `cl
 one real login in `~/.claude.json` (only its settings are copied).
 
 `tests/smoke.sh` checks the parts that differ per system: ending `claude`, sharing files (on
-Windows also with junctions and hard links), and reading the quota. CI runs it on Ubuntu, macOS
+Windows also with junctions and hard links), reading the quota, and the switch to opus at a model limit. CI runs it on Ubuntu, macOS
 and Windows at each push. To check your own machine, run it (in Git Bash on Windows). It needs
 `node`, and it does not need a login.
 
