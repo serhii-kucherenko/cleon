@@ -319,6 +319,7 @@ Superset sets `CLAUDE_CONFIG_DIR` from it, and that replaces the account `cleon`
 ```bash
 python3 tests/test_cleon.py     # end-to-end tests (macOS and Linux)
 bash tests/smoke.sh             # the parts that differ per system (also Windows)
+bash scripts/check.sh           # what CI runs: every script parses, then the smoke test
 demo/record.sh                  # makes demo/cleon.mp4 and demo/cleon.gif again
 ```
 
