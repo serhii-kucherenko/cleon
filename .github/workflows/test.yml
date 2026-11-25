@@ -19,11 +19,5 @@ jobs:
       - uses: actions/checkout@v5
       - name: Scripts parse
         run: for f in bin/cleon hooks/cleon-swap.sh install.sh tests/smoke.sh demo/setup.sh demo/record.sh; do bash -n "$f"; done
-      - name: Diagnose (temporary)
-        if: runner.os == 'Linux'
-        run: |
-          node --version; ps --version; ls -l "$(command -v ps)" "$(command -v node)"
-          ln -s "$(command -v node)" /tmp/claude
-          /tmp/claude -e 'require("child_process").execSync("bash -c \"ps -o pid=,comm=,args= -p $PPID; cat /proc/$PPID/comm; ls -l /proc/$PPID/exe\"", {stdio: "inherit"})'
       - name: Smoke test
         run: bash tests/smoke.sh

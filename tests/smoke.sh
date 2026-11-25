@@ -24,7 +24,8 @@ export CLEON_SWAP_FILE="$T/swap"
 hook="$REPO/hooks/cleon-swap.sh"
 [ -n "$exe" ] && hook="$(cygpath -m "$hook")" CLEON_SWAP_FILE="$(cygpath -m "$T/swap")"
 stop_failure() { # stop_failure <message>: claude stops on a usage limit and runs the hook
-	"$T/bin/claude$exe" -e '
+	# Like the real claude, set the title: on Linux that is the name ps shows (Node 24 says "MainThread").
+	"$T/bin/claude$exe" -e 'process.title = "claude";
 		require("child_process").execFileSync("bash", [process.argv[1]], {input: JSON.stringify({session_id: "sid",
 			hook_event_name: "StopFailure", error: "rate_limit", last_assistant_message: process.argv[2]})});
 		setTimeout(() => {}, 30000);' "$hook" "$1"
