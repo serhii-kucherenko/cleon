@@ -7,6 +7,7 @@
 #   4. on Windows, share again without symlinks: a junction for a folder, a hard link for a file
 #   5. one    with one account only, cleon says so: a wrong CLEON_HOME looks just like that
 #   6. link   a linked accounts folder: claude gets the real path, since macOS ties each login to it
+#   7. model  a limit on one model at every account: the chat goes on with opus at once
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 T="$(mktemp -d)"
@@ -22,14 +23,20 @@ if [ -n "$exe" ]; then cp "$(command -v node)" "$T/bin/claude.exe"; else ln -s "
 export CLEON_SWAP_FILE="$T/swap"
 hook="$REPO/hooks/cleon-swap.sh"
 [ -n "$exe" ] && hook="$(cygpath -m "$hook")" CLEON_SWAP_FILE="$(cygpath -m "$T/swap")"
+stop_failure() { # stop_failure <message>: claude stops on a usage limit and runs the hook
+	"$T/bin/claude$exe" -e '
+		require("child_process").execFileSync("bash", [process.argv[1]], {input: JSON.stringify({session_id: "sid",
+			hook_event_name: "StopFailure", error: "rate_limit", last_assistant_message: process.argv[2]})});
+		setTimeout(() => {}, 30000);' "$hook" "$1"
+}
 start=$SECONDS
-"$T/bin/claude$exe" -e '
-	require("child_process").execFileSync("bash", [process.argv[1]], {input: JSON.stringify(
-		{session_id: "sid", hook_event_name: "StopFailure", error: "rate_limit"})});
-	setTimeout(() => {}, 30000);' "$hook"
+stop_failure "You've hit your weekly limit · resets Nov 29 at 9pm"
 rc=$?
 check "kill: the hook ends claude" '[ "$rc" -ne 0 ] && [ $((SECONDS - start)) -lt 20 ]'
 check "kill: the hook tells cleon why" '[ "$(cat "$T/swap" 2>/dev/null)" = "sid limit" ]'
+stop_failure "You've hit your Fable limit · resets Nov 29 at 9pm (America/Vancouver)"
+check "kill: a model limit names the model" \
+	'[ "$(cat "$T/swap" 2>/dev/null)" = "sid model Fable resets Nov 29 at 9pm (America/Vancouver)" ]'
 unset CLEON_SWAP_FILE
 
 # 2. share and 3. quota, on a fake claude that answers only what cleon ls asks
@@ -64,6 +71,22 @@ if [ -n "$exe" ]; then
 	check "share without symlinks: says to turn on Developer Mode" 'grep -q "Developer Mode" <<<"$fallback"'
 	out="$out$fallback"
 fi
+
+# 7. model: every account hit a limit on one model (all have room): the chat goes on with opus, with no wait
+mkdir -p "$T/model"
+cat >"$T/model/claude" <<EOF
+#!/bin/bash
+case " \$* " in
+*" --model opus "*) echo "\$*" >>"$T/model/runs" ;;
+*) echo "sid model Fable resets Nov 29 at 9pm (America/Vancouver)" >"\$CLEON_SWAP_FILE"; exit 1 ;;
+esac
+EOF
+chmod +x "$T/model/claude"
+model="$(PATH="$T/model:$PATH" perl -e 'alarm 20; exec @ARGV' "$REPO/bin/cleon" --model fable "say hi" 2>&1)"
+check "model: cleon says why it switches" 'grep -q "every account hit its Fable limit. It resets Nov 29" <<<"$model"'
+check "model: the chat goes on with opus at once" \
+	'[ "$(cat "$T/model/runs" 2>/dev/null)" = "--model opus --resume sid Continue where you stopped." ]'
+out="$out$model"
 
 one="$(CLEON_HOME="$T/none" "$REPO/bin/cleon" 2>&1)"
 check "one account: cleon says so" 'grep -q "only one account" <<<"$one"'

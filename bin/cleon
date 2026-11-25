@@ -289,12 +289,13 @@ for ((k = 0; k < ${#args[@]}; k++)); do
 	--model | --permission-mode | --agent | --add-dir | --settings) keep+=("${args[$k]}" "${args[$((k + 1))]:-}"); k=$((k + 1)) ;;
 	esac
 done
+fallback=opus # the model a chat goes on with when every account hit a limit on its model
 while :; do
 	name="${list[$i]}"
 	swap="$(mktemp)"
 	CLEON_SWAP_FILE="$(winpath "$swap")" on "$name" claude ${args[@]+"${args[@]}"}
 	rc=$?
-	read -r sid why win <"$swap"
+	read -r sid why win rest <"$swap" # rest: when a model limit resets
 	rm -f "$swap" "$swap.asked"
 	[ -n "${sid:-}" ] || exit "$rc"
 	stty sane 2>/dev/null
@@ -302,11 +303,25 @@ while :; do
 	reserve) what="is down to its $(reserve_of "$win") reserve" ;;
 	paused) what="paused its work at its $(reserve_of "$win") reserve" ;;
 	login) what="has a login that no longer works ($(relogin "$name"))" ;;
+	model) what="hit its $win limit" ;;
 	*) what="hit its limit" ;;
 	esac
 	# A stop with room on record means the record is stale: the account sits out 30 min.
 	has_room "$name" && out[$i]=$(($(date +%s) + 1800))
 	i="$(next_with_room)"
+	# Every account hit a limit on one model: go on with the fallback model now, not after a wait.
+	if [ "$i" -ge "$n" ] && [ "$why" = model ] && [ -n "$fallback" ] && [ "$(echo "$win" | tr A-Z a-z)" != "$fallback" ]; then
+		echo "cleon: every account hit its $win limit.${rest:+ It $rest.} Switching the chat from $win to $fallback." >&2
+		use=()
+		for ((k = 0; k < ${#keep[@]}; k++)); do
+			case "${keep[$k]}" in --model) k=$((k + 1)) ;; --model=*) ;; *) use+=("${keep[$k]}") ;; esac
+		done
+		keep=(${use[@]+"${use[@]}"} --model "$fallback")
+		fallback="" # once: a limit on the fallback too waits as usual
+		# ponytail: clears every sit-out; an account out for a stale general limit fails fast and sits out again.
+		out=()
+		i="$(next_with_room)"
+	fi
 	if [ "$i" -ge "$n" ]; then
 		echo "cleon: $name $what. The chat is saved: cleon --resume $sid" >&2
 		wait_for_room
@@ -321,7 +336,7 @@ while :; do
 	if [ -z "$off" ]; then
 		case "$why" in
 		paused) args+=("Resume the paused work: the last account reached its quota reserve. Carry on from your handoff. If nothing is left, say so in one line.") ;;
-		limit | login) args+=("Continue where you stopped.") ;;
+		limit | login | model) args+=("Continue where you stopped.") ;;
 		esac
 	fi
 done
